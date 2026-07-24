@@ -1,0 +1,4 @@
+# Hekayati tools — Python deps for story_pipeline.py (PDF + image checks)
+pillow>=10.0.0
+reportlab>=4.0.0
+pypdf>=4.0.0

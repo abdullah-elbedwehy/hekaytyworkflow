@@ -1,0 +1,6 @@
+# Local junk for hekaytyworkflow tools
+**/.env
+**/*.key
+.DS_Store
+**/__pycache__/
+*.pyc

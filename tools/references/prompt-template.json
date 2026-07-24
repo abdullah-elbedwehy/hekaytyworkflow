@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "assetId": "page-01",
+  "version": 1,
+  "useCase": "illustration-story",
+  "narrativeBeat": "CHANGE: one causal beat this page must show",
+  "locationId": "CHANGE: exact locationId from story.json for this page — must match, it selects the location-sheet reference",
+  "primaryRequest": "CHANGE: one drawable group action (name who does what)",
+  "inputImages": [
+    {
+      "role": "persona-identity",
+      "personaId": "persona-01",
+      "path": "CHANGE: absolute persona-01 photo"
+    },
+    {
+      "role": "persona-identity",
+      "personaId": "persona-02",
+      "path": "CHANGE: absolute persona-02 photo — only if on this page"
+    },
+    {
+      "role": "character-sheet",
+      "path": "CHANGE: absolute accepted character-sheet path after gate"
+    }
+  ],
+  "participants": [
+    {
+      "id": "persona-01",
+      "displayName": "CHANGE Arabic name",
+      "role": "hero",
+      "onPage": true
+    },
+    {
+      "id": "persona-02",
+      "displayName": "CHANGE Arabic name or omit if not on page",
+      "role": "companion",
+      "onPage": true
+    }
+  ],
+  "guests": [
+    {
+      "id": "guest-optional",
+      "displayName": "CHANGE kid-facing alias (Arabic ok) — not the franchise English name",
+      "canonicalHint": "CHANGE optional private hint e.g. spider-man — NEVER copy into compiledPrompt",
+      "appearanceNotes": "CHANGE: detailed visual description only — costume colors, mask, silhouette, materials. NO real character name, NO logos, NO trademarks."
+    }
+  ],
+  "identityLocks": {
+    "persona-01": {
+      "face": "match persona-01 photo exactly: same face structure, eyes, brows, nose, mouth, likeness",
+      "age": "same apparent age as reference",
+      "skin": "same complexion as reference",
+      "hair": "same hair color, length, style as reference",
+      "build": "same build as reference",
+      "accessories": "CHANGE: recurring accessories if any"
+    },
+    "persona-02": {
+      "face": "match persona-02 photo exactly — never borrow persona-01 features",
+      "age": "same apparent age as reference",
+      "skin": "same complexion as reference",
+      "hair": "same hair color, length, style as reference",
+      "build": "same build as reference",
+      "accessories": "CHANGE or none"
+    }
+  },
+  "fixedOutfits": {
+    "persona-01": "CHANGE once in brief/story, reuse verbatim every page this person appears",
+    "persona-02": "CHANGE once, reuse verbatim"
+  },
+  "spatialStaging": "CHANGE when 2+ people: left/right/front positions, who faces whom, contact or distance",
+  "scene": {
+    "place": "CHANGE: specific named location (not vague)",
+    "timeOfDay": "CHANGE: hour + light quality (e.g. soft golden morning, cool blue dusk)",
+    "atmosphere": "CHANGE: mood + weather + air feel",
+    "lighting": "CHANGE: key light direction, color temperature, shadows soft/hard, rim/fill",
+    "foreground": "CHANGE: near objects with material, color, scale (must be drawable)",
+    "midground": "CHANGE: where action happens — surfaces, furniture, paths, plants",
+    "background": "CHANGE: far layer — sky, buildings, trees, horizon depth",
+    "propsInFrame": [
+      "CHANGE: every visible prop with color + material + state"
+    ],
+    "backdropDetails": "CHANGE: 3–6 concrete sensory details (textures, colors, small life)"
+  },
+  "actionAndEmotion": {
+    "persona-01": {
+      "action": "CHANGE: body pose, hands, gaze, weight shift — one clear moment",
+      "emotion": "CHANGE: face expression + body language"
+    },
+    "persona-02": {
+      "action": "CHANGE: complementary pose in same moment (not a second beat)",
+      "emotion": "CHANGE"
+    }
+  },
+  "style": {
+    "medium": "CHANGE: paste from themes/catalog.json for brief.themeId (default storybook: premium whimsical children's storybook digital illustration, magical realism, soft painterly textures, cinematic multi-source lighting)",
+    "finish": "CHANGE: paste from catalog for same themeId (default storybook: rich saturated color, detailed joyful faces, warm-cool light mix, print-ready, NOT flat cartoon, NOT clipart, NOT washed gouache)",
+    "immutable": true
+  },
+  "composition": {
+    "orientation": "landscape",
+    "shotScale": "CHANGE: wide|medium|close — must differ from adjacent pages",
+    "viewpoint": "CHANGE: eye-level|low|high — must differ from adjacent pages",
+    "focalHierarchy": "CHANGE: who/what eye hits first, second, third",
+    "textIntegration": {
+      "placement": "CHANGE: top|bottom|side — quiet zone in art, differ from adjacent pages",
+      "blendMode": "CHANGE: painted-into-sky | soft-caption-band | chalk-on-surface | carved-sign | floating-letterforms matching palette",
+      "surface": "CHANGE: what the Arabic sits on (sky wash, stone path, wooden beam, soft vignette band sharing scene colors)",
+      "legibility": "high — readable at print size, never cropped, never colliding with faces/hands"
+    }
+  },
+  "text": {
+    "verbatimArabic": "CHANGE: exact string from story.json for this page",
+    "direction": "rtl",
+    "renderingRules": "Render the quoted Arabic exactly once inside the illustration, right-to-left, correctly connected, fully legible, with no missing, added, reversed, mirrored, or substituted characters. Blend the lettering into the scene as part of the art — soft storybook typography that shares the page palette, lighting, and texture (gentle painted caption band, sky wash, or environmental surface). Do NOT use a hard white box, sticker label, speech bubble, or detached UI panel. Keep a quiet clear zone so faces and action stay unobstructed. Large simple Arabic display typeface. No Latin text."
+  },
+  "palette": "CHANGE once in story continuity, reuse with beat emphasis only",
+  "continuity": {
+    "fromPreviousPage": "CHANGE: props/outfit/state carried forward for each returning persona",
+    "recurringProps": [],
+    "propStates": {}
+  },
+  "constraints": [
+    "exactly listed participants only — no extra people",
+    "each on-page persona matches their own photo identity lock (no face swap)",
+    "complete anatomy: hands, feet, faces uncropped unless intentional close-up",
+    "one shared visible moment",
+    "landscape full-bleed full-page illustration (wider than tall)",
+    "describe every visible layer: foreground, midground, background, props",
+    "Arabic text blended into the artwork, not a separate box"
+  ],
+  "avoid": [
+    "extra people",
+    "identity drift",
+    "identity swap between personas",
+    "outfit drift",
+    "malformed hands",
+    "cropped text",
+    "mirrored Arabic",
+    "extra letters",
+    "Latin text",
+    "numbers unless required",
+    "hard white text boxes",
+    "sticker labels",
+    "speech bubbles unless requested",
+    "empty vague scenes",
+    "franchise character names in the image prompt",
+    "brand logos",
+    "trademark emblems",
+    "logos",
+    "watermarks",
+    "living-artist imitation"
+  ],
+  "compiledPrompt": "CHANGE: single final prompt string assembled from fields above for $imagegen"
+}

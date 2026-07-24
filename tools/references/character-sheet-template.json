@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "assetId": "character-sheet",
+  "version": 1,
+  "useCase": "illustration-character-sheet",
+  "narrativeBeat": "identity lock sheet for ALL recurring personas in this project",
+  "primaryRequest": "Create one character reference sheet showing EVERY persona consistently across multiple views, clearly separated, same fixed outfits",
+  "inputImages": [
+    {
+      "role": "persona-identity",
+      "personaId": "persona-01",
+      "path": "CHANGE: absolute path — repeat one entry per persona"
+    }
+  ],
+  "participants": [
+    {
+      "id": "persona-01",
+      "displayName": "CHANGE Arabic name",
+      "role": "hero",
+      "onPage": true
+    },
+    {
+      "id": "persona-02",
+      "displayName": "CHANGE — include ALL personas",
+      "role": "companion",
+      "onPage": true
+    }
+  ],
+  "guests": [],
+  "identityLocks": {
+    "persona-01": {
+      "face": "match photo exactly",
+      "age": "as reference",
+      "skin": "as reference",
+      "hair": "as reference",
+      "build": "as reference",
+      "accessories": "CHANGE"
+    },
+    "persona-02": {
+      "face": "match photo exactly — distinct from persona-01",
+      "age": "as reference",
+      "skin": "as reference",
+      "hair": "as reference",
+      "build": "as reference",
+      "accessories": "CHANGE"
+    }
+  },
+  "fixedOutfits": {
+    "persona-01": "CHANGE lock once",
+    "persona-02": "CHANGE lock once"
+  },
+  "spatialStaging": "grid layout: each persona in own column/row, never overlapping, labels forbidden",
+  "scene": {
+    "place": "clean neutral studio backdrop",
+    "timeOfDay": "even soft light",
+    "atmosphere": "clear reference lighting",
+    "lighting": "even soft studio light, minimal shadows, equal exposure on every face",
+    "foreground": "empty",
+    "midground": "each persona standing clear of others",
+    "background": "plain light seamless backdrop",
+    "propsInFrame": [],
+    "backdropDetails": "plain light background, no props clutter, no scenery"
+  },
+  "actionAndEmotion": {
+    "persona-01": {
+      "action": "neutral standing / turnaround poses for reference",
+      "emotion": "calm clear expression for likeness lock"
+    },
+    "persona-02": {
+      "action": "neutral standing / turnaround poses for reference",
+      "emotion": "calm clear expression for likeness lock"
+    }
+  },
+  "style": {
+    "medium": "CHANGE: paste from themes/catalog.json for brief.themeId (default storybook: premium whimsical children's storybook digital illustration, magical realism, soft painterly textures, cinematic multi-source lighting)",
+    "finish": "CHANGE: paste from catalog for same themeId (default storybook: rich saturated color, detailed joyful faces, warm-cool light mix, print-ready, NOT flat cartoon, NOT clipart, NOT washed gouache)",
+    "immutable": true
+  },
+  "composition": {
+    "orientation": "landscape",
+    "shotScale": "multi-view reference sheet",
+    "viewpoint": "orthographic-friendly reference layout",
+    "focalHierarchy": "faces and outfits first for every persona",
+    "textIntegration": {
+      "placement": "none",
+      "blendMode": "n/a",
+      "surface": "n/a",
+      "legibility": "n/a — no story text"
+    }
+  },
+  "text": {
+    "verbatimArabic": "",
+    "direction": "rtl",
+    "renderingRules": "No story text. No labels. No captions. No names written on the sheet."
+  },
+  "palette": "CHANGE: match story continuity palette",
+  "continuity": {
+    "fromPreviousPage": "n/a",
+    "recurringProps": [],
+    "propStates": {}
+  },
+  "constraints": [
+    "include EVERY project persona on this one sheet",
+    "for EACH persona show: face close-up, front, three-quarter, side, full-body",
+    "keep each person in a separate clear zone — no overlap",
+    "show hands and shoes clearly",
+    "exact fixed outfits per persona",
+    "faces must match each persona photo independently (no identity swap)",
+    "landscape sheet (wider than tall) — same orientation as the book pages"
+  ],
+  "avoid": [
+    "story text",
+    "labels",
+    "name tags",
+    "extra people",
+    "identity drift",
+    "identity swap",
+    "missing persona",
+    "logos",
+    "watermarks"
+  ],
+  "compiledPrompt": "CHANGE: describe full multi-persona turnaround sheet for $imagegen"
+}

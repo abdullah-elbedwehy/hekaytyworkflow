@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 1,
+  "note": "Ready-made original guest characters. When a family asks for a famous character, pick the archetype that satisfies the same wish and paste its appearanceNotes verbatim. These descriptions are deliberately distinct from any protected design: no emblem, no signature logo, no trademark silhouette, no franchise name. Never write the franchise name in any image-bound field — the pipeline rejects it.",
+  "usage": "Copy the entry into story.json guestCharacters[] and into each page prompt's guests[]. Keep displayName Arabic and kid-friendly; keep appearanceNotes exactly as written unless the family asks for a change, then keep it equally concrete.",
+  "guests": {
+    "web-swinger": {
+      "id": "guest-web-swinger",
+      "wishItSatisfies": "the masked hero who swings between rooftops on ropes/threads",
+      "displayName": "سِراج",
+      "appearanceNotes": "athletic young adult rooftop rescuer in a close-fitting deep-plum and mint-green suit with a thin gold thread pattern running over the shoulders and down the outer arms, full soft-cloth face mask with two large rounded amber lenses, short mint half-cape clipped at one shoulder, coil of braided golden rope at the hip, fingerless grey gloves, soft boots with mint soles, friendly agile silhouette, no emblem on the chest, no logo, no trademark marking",
+      "avoidDrift": ["spider motifs", "web patterns", "red and blue suit", "chest emblem"]
+    },
+    "ice-keeper": {
+      "id": "guest-ice-keeper",
+      "wishItSatisfies": "the ice princess with freezing magic",
+      "displayName": "نجمة",
+      "appearanceNotes": "kind young woman who keeps a winter valley, wearing a layered pale-teal and soft-grey wool coat with hand-stitched snowflake embroidery at the cuffs, thick knitted scarf in warm cream, dark auburn hair in a thick side braid tied with grey ribbon, small frost crystals resting on her shoulders like snow, warm brown eyes, mittens, sturdy fur-lined boots, gentle approachable posture, no crown, no gown, no platinum-blonde hair, no logo",
+      "avoidDrift": ["platinum blonde braid", "sparkling ice-blue ballgown", "ice palace throne"]
+    },
+    "night-guardian": {
+      "id": "guest-night-guardian",
+      "wishItSatisfies": "the caped night-time protector of the city",
+      "displayName": "حارس الليل",
+      "appearanceNotes": "calm adult city guardian in a deep forest-green padded coat with a wide standing collar, soft charcoal hood with two short rounded points, plain matte-brass buckle at the belt, long dark-green cloak that catches the wind, simple domino mask in charcoal, sturdy brown boots and gloves, a small lantern clipped at the waist, reassuring rather than frightening, no bat shapes, no chest emblem, no black armour, no logo",
+      "avoidDrift": ["bat silhouette", "pointed cowl ears", "all-black armour"]
+    },
+    "sky-champion": {
+      "id": "guest-sky-champion",
+      "wishItSatisfies": "the flying caped super-strong hero",
+      "displayName": "شهاب",
+      "appearanceNotes": "cheerful adult flyer in a warm terracotta and cream flight suit with soft padded shoulders, short mustard-yellow cape that ends at the waist, wide woven belt with a plain round copper clasp, aviator goggles pushed up on the forehead, close-cropped dark curls, broad friendly build, cream boots with terracotta cuffs, always shown mid-hover with arms relaxed, no chest shield, no letter marking, no primary-blue-and-red combination, no logo",
+      "avoidDrift": ["blue suit with red cape", "chest shield shape", "S marking"]
+    },
+    "gentle-dragon": {
+      "id": "guest-gentle-dragon",
+      "wishItSatisfies": "a friendly dragon companion",
+      "displayName": "زُهَير",
+      "appearanceNotes": "young house-cat-sized dragon with soft sage-green scales, a cream belly, rounded harmless snout with no visible fangs, large amber eyes with round pupils, small rounded wings that look slightly too small for his body, three soft spines down the back in dusty rose, stubby tail ending in a leaf shape, clumsy endearing posture, often sitting on a shoulder, no fire, no horns, no menace, no logo",
+      "avoidDrift": ["fierce fanged dragon", "fire breathing", "horned skull"]
+    },
+    "sea-mapper": {
+      "id": "guest-sea-mapper",
+      "wishItSatisfies": "the mermaid who lives under the sea",
+      "displayName": "مرجانة",
+      "appearanceNotes": "young underwater map-maker with a long coral-orange fish tail patterned with fine pale-gold scales, soft teal woven top made of sea-grass fibre, dark curly hair gathered up with a strip of kelp and a single flat mother-of-pearl disc, warm deep-brown skin, a rolled waterproof chart tucked under one arm, small satchel of shells at the hip, curious cheerful expression, no red hair, no shell bikini, no purple tail, no logo",
+      "avoidDrift": ["red hair", "purple tail", "shell top"]
+    },
+    "royal-host": {
+      "id": "guest-royal-host",
+      "wishItSatisfies": "visiting a princess in her palace",
+      "displayName": "الأميرة لُجين",
+      "appearanceNotes": "warm young princess of a desert palace in a flowing pale-lilac and silver-thread gown with wide embroidered sleeves and a soft sash, delicate silver circlet with one small clear stone resting on dark braided hair, henna patterns on the backs of her hands, soft leather slippers, welcoming open-armed posture, dignified but playful, no puffed ballgown, no tiara with many points, no blonde hair, no logo",
+      "avoidDrift": ["blue puffed ballgown", "glass slipper", "long blonde hair"]
+    },
+    "friendly-pirate": {
+      "id": "guest-friendly-pirate",
+      "wishItSatisfies": "a treasure-hunting pirate captain",
+      "displayName": "القبطانة ليمونة",
+      "appearanceNotes": "cheerful adult woman sea captain in a lemon-yellow long coat with turned-back cuffs, wide navy sash, soft brown tricorn-style hat with a yellow feather, thick dark braid over one shoulder, brass spyglass on a cord, sturdy boots, both hands and both eyes intact, warm laughing face, no skull motifs, no weapons, no eye patch, no logo",
+      "avoidDrift": ["skull and crossbones", "cutlass", "eye patch and hook"]
+    },
+    "toy-leader": {
+      "id": "guest-toy-leader",
+      "wishItSatisfies": "toys that come alive at night",
+      "displayName": "نُقطة",
+      "appearanceNotes": "hand-sewn cloth doll about forearm height, patchwork body in mustard, dusty rose and sage fabric squares with visible running-stitch seams, flat black button eyes, a simple stitched smile, yarn hair in loose russet loops tied with a scrap of ribbon, one slightly mismatched replacement arm in a lighter fabric, moves with soft floppy weight, no cowboy hat, no plastic spaceman shell, no logo",
+      "avoidDrift": ["cowboy toy", "space ranger toy", "pull string"]
+    },
+    "animal-detective": {
+      "id": "guest-animal-detective",
+      "wishItSatisfies": "a clever animal who solves mysteries",
+      "displayName": "الأستاذ فهد",
+      "appearanceNotes": "upright sand-coloured desert fox the height of a child, oversized rounded ears with cream inner fur, wearing a small olive waistcoat with two brass buttons and a soft grey neckerchief, round wire spectacles perched low on the muzzle, a stub of pencil tucked behind one ear, carries a small notebook, bushy tail with a cream tip, thoughtful patient expression, walks on two legs, no deerstalker hat, no pipe, no logo",
+      "avoidDrift": ["deerstalker and pipe", "police uniform", "rabbit officer"]
+    },
+    "light-team": {
+      "id": "guest-light-team",
+      "wishItSatisfies": "a team of superheroes working together",
+      "displayName": "فرقة الضوء",
+      "appearanceNotes": "small team of three adult helpers in matching soft-grey work jumpsuits, each with one distinguishing colour panel across the chest and down one sleeve — one amber, one teal, one dusty rose — plain round fabric badges with no marking, soft cloth half-masks that leave mouth and chin visible, practical tool belts holding a lantern, a coil of rope and a folded map respectively, ordinary friendly builds of different heights, no capes, no emblems, no logos",
+      "avoidDrift": ["team emblems", "primary-colour spandex", "capes"]
+    },
+    "cloud-conductor": {
+      "id": "guest-cloud-conductor",
+      "wishItSatisfies": "a magical train guide in the sky",
+      "displayName": "عم غيمان",
+      "appearanceNotes": "round elderly train conductor with a full white beard, wearing a deep-indigo uniform coat with two rows of copper buttons and soft cloud-white piping at the collar and cuffs, flat-topped indigo cap with a brass whistle badge, small round glasses, holds a brass pocket watch on a chain, gentle stooped posture, kind crinkled eyes, ticket punch on a cord, no franchise insignia, no logo",
+      "avoidDrift": ["polar express conductor", "steam-engine face", "golden ticket"]
+    },
+    "star-keeper": {
+      "id": "guest-star-keeper",
+      "wishItSatisfies": "a magical helper who lives among the stars",
+      "displayName": "قمر",
+      "appearanceNotes": "small floating child-sized being made of soft warm light, pale gold skin with a faint glow at the edges, hair like slow drifting starlight in cream and pale blue, wearing a simple wrapped tunic of deep-indigo cloth scattered with tiny points of light, bare feet that never quite touch the ground, trails a thin ribbon of light when moving, round gentle face, no wings, no wand, no halo, no logo",
+      "avoidDrift": ["fairy with wings and wand", "genie", "glowing blue spirit"]
+    },
+    "forest-listener": {
+      "id": "guest-forest-listener",
+      "wishItSatisfies": "a talking tree or forest spirit guide",
+      "displayName": "جدّ السنديان",
+      "appearanceNotes": "ancient oak whose trunk carries a wide calm face formed from natural bark ridges — two deep-set hollows for eyes and a long horizontal split for a mouth, moss growing along one shoulder-like branch, two thick lower limbs that move slowly like arms, roots lifted enough to shuffle, canopy of small round leaves in deep green and bronze, small birds nesting in the crown, warm and grandfatherly, no glowing eyes, no menacing face, no logo",
+      "avoidDrift": ["angry throwing tree", "glowing spirit mask", "walking treant warrior"]
+    },
+    "little-dinosaur": {
+      "id": "guest-little-dinosaur",
+      "wishItSatisfies": "a baby dinosaur friend",
+      "displayName": "تيتو",
+      "appearanceNotes": "knee-high young long-necked dinosaur with smooth dusty-blue skin, a pale cream underside, soft rounded head with no teeth showing, huge dark eyes with long lashes, three small blunt toes per foot, a short thick tail he wags when happy, a ring of tiny soft bumps along the spine, wobbly newborn movements, no sharp claws, no roaring, no logo",
+      "avoidDrift": ["sharp-toothed raptor", "cartoon purple dinosaur", "singing dinosaur"]
+    }
+  }
+}

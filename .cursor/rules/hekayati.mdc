@@ -1,0 +1,45 @@
+---
+description: Hekayati Cursor workflow — one skill, Codex images only
+alwaysApply: true
+---
+
+# Hekayati (Cursor-first)
+
+- `hekaytyworkflow/tools/` = scripts + schemas only.
+- Client project holds all `input/` + `output/` artifacts.
+- Agent entry: Cursor skill **`hekayati`** (`.cursor/skills/hekayati`).
+- Baked ops: `tools/references/agent-core.md` (multi-persona + parallel + routing).
+- Images: Codex `$imagegen` only via `generate-book-images` / skill `codex-imagegen`.
+- Never Gemini API, OpenAI Images API, key CSVs, or deleted `hekayati-review-*` skills.
+- Parallel: write all prompts in one pass; pages generate in one Codex dispatch; reviews in parallel.
+- **Book start (helpful):** on `ابدأ` / `start` / new book, run `list-templates` +
+  `list-themes` and offer **all** ready-made adventures **and** **all** art themes
+  before deep interview questions. Also offer custom story.
+- Ready-made route: `list-templates` → confirm identity/outfit/age →
+  `apply-template` (+ optional note) → tailor note-affected pages + adapt all
+  copy if source/target profiles differ → `review-story` →
+  `complete-template-customization` → `lock-story`. Cross-profile completion
+  requires every interior page and total interior copy inside target ranges.
+- Template selection state is mirrored across story/brief/book. Exact age,
+  source/target profiles, profile fields, flags, and timestamps must match; use
+  workflow commands, never hand-edit gates.
+- Theme: `list-themes` → `apply-theme --theme <id>` (all catalog themes).
+- **Personalization:** family describes the child (عادة / صفة / «لازم يظهر …») →
+  `set-personalization`. One habit per book owns the arc (setup → challenge →
+  turn → reinforce; the child decides on `turn`); requests become locations and
+  recurring props. `lock-story` blocks until `story.personalization` carries
+  `habitArc` + `requestCoverage`. Contract: `tools/references/personalization.md`.
+- Exact age: `show-age-profile --age N` before writing; use its Egyptian dictionary, word budget, and arc stages. Emit canonical `language: "natural Egyptian Arabic"`.
+- Custom route: interview → story (incl. `narrativeArc` + `locations[]` bible) → `review-story` → `lock-story`.
+- Story QA: one arc stage per page unless exactly two adjacent stages are
+  declared in `combinedArcStages`; distinct
+  beats; location change **or** full cast replacement needs a bridge visibly in
+  current `page.text`, and any `transitionFromPrevious` must be verbatim there.
+  `age-1-2` may declare exact full-page repeats in `refrainPhrases`; older
+  profiles may recur only a short phrase inside advancing text. Duplicate beats
+  stay blocked. `protectedPhrases` accepts registry-only `{"registryId":"…"}`
+  entries from `age-profiles.json.protectedPhraseRegistry`.
+- Then: prompts folder → `compile-prompts` → `validate-prompts` → `generate-book-images` → PDF → review rubrics in `.cursor/skills/hekayati/references/reviews/` → iterate.
+- **Six locks:** identity · place · shape · prompt · age language · causal story spine.
+- Image order: character sheet → location sheets → interior pages → **covers last**.
+- Famous characters: `list-guests` → paste `appearanceNotes`. Never the franchise name, Latin or Arabic — the image gets refused.

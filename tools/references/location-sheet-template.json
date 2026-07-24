@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "assetId": "location-sheet-01",
+  "version": 1,
+  "useCase": "illustration-location-sheet",
+  "locationId": "CHANGE: exact locationId from story.json locations[]",
+  "narrativeBeat": "place identity lock — the visual definition every page set here must match",
+  "primaryRequest": "Create one location reference sheet for this single place: a establishing wide view plus 2-3 smaller angle studies of the same place, no people",
+  "inputImages": [
+    {
+      "role": "style",
+      "path": "CHANGE: absolute style reference path — omit the whole array if input/style/ is empty"
+    }
+  ],
+  "participants": [],
+  "guests": [],
+  "identityLocks": {},
+  "fixedOutfits": {},
+  "spatialStaging": "panel layout: one large establishing view on the left, 2-3 smaller angle studies stacked on the right, thin neutral gutters between panels, no borders drawn as decoration",
+  "scene": {
+    "place": "CHANGE: paste locations[].nameAr + the full English visualDefinition — architecture type, scale, layout",
+    "timeOfDay": "CHANGE: the location's default light (pages may shift this, the geometry may not)",
+    "atmosphere": "CHANGE: mood + weather + air of this place",
+    "lighting": "CHANGE: key light direction, color temperature, shadow softness for the default hour",
+    "foreground": "CHANGE: fixed near elements that belong to this place permanently",
+    "midground": "CHANGE: the main stage where story action will happen",
+    "background": "CHANGE: far layer — skyline, horizon, far walls, depth cues",
+    "propsInFrame": [
+      "CHANGE: every FIXED landmark of this place with color + material (a tree, a shop sign, a fountain, a striped rug). These must reappear on every page set here."
+    ],
+    "backdropDetails": "CHANGE: 3-6 concrete sensory details that make this place recognizable at a glance"
+  },
+  "actionAndEmotion": {},
+  "style": {
+    "medium": "CHANGE: paste from themes/catalog.json for brief.themeId — identical to every page prompt",
+    "finish": "CHANGE: paste from catalog for the same themeId",
+    "immutable": true
+  },
+  "composition": {
+    "orientation": "landscape",
+    "shotScale": "establishing wide + angle studies",
+    "viewpoint": "eye-level establishing plus one high and one low study",
+    "focalHierarchy": "architecture and fixed landmarks first — this sheet exists to lock geometry, not mood",
+    "textIntegration": {
+      "placement": "none",
+      "blendMode": "n/a",
+      "surface": "n/a",
+      "legibility": "n/a — no story text"
+    }
+  },
+  "text": {
+    "verbatimArabic": "",
+    "direction": "rtl",
+    "renderingRules": "No story text. No labels. No captions. No panel titles. No arrows or annotations."
+  },
+  "palette": "CHANGE: this location's locked palette — pages may re-light it but not repaint it",
+  "continuity": {
+    "fromPreviousPage": "n/a",
+    "recurringProps": [],
+    "propStates": {}
+  },
+  "constraints": [
+    "one place only — never combine two locations on one sheet",
+    "absolutely no people, no characters, no animals",
+    "show the same place from every angle panel — same architecture, same landmarks, same materials",
+    "fixed landmarks must be clearly readable so pages can reuse them",
+    "landscape sheet (wider than tall) — same orientation as the book pages",
+    "empty stage: leave room where characters will later stand"
+  ],
+  "avoid": [
+    "people",
+    "characters",
+    "animals",
+    "story text",
+    "labels",
+    "name tags",
+    "arrows or annotation marks",
+    "a different building or layout between panels",
+    "logos",
+    "watermarks",
+    "living-artist imitation"
+  ],
+  "compiledPrompt": "CHANGE: single final prompt string for $imagegen describing this one empty place as a multi-angle reference sheet"
+}

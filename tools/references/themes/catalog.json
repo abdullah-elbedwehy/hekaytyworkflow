@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "defaultThemeId": "storybook",
+  "themes": {
+    "storybook": {
+      "themeId": "storybook",
+      "label": "Storybook",
+      "labelAr": "ستوري بوك رسمة",
+      "fingerprint": "premium whimsical children's storybook digital illustration",
+      "visualStyle": "premium whimsical children's storybook digital illustration, magical realism, cinematic lighting",
+      "style": {
+        "medium": "premium whimsical children's storybook digital illustration, magical realism, soft painterly textures, cinematic multi-source lighting",
+        "finish": "rich saturated color, detailed joyful faces, warm-cool light mix, print-ready, NOT flat cartoon, NOT clipart, NOT washed gouache"
+      },
+      "avoidExtras": [
+        "flat cartoon",
+        "clipart",
+        "washed flat gouache"
+      ],
+      "textBlendHint": "Soft painted storybook caption / sky wash / palette-matched lettering blended into the art — not a hard white box.",
+      "compiledPromptStyleBlock": "premium whimsical children's storybook digital illustration, magical realism, soft painterly textures, cinematic multi-source lighting, rich saturated color, detailed joyful faces, warm-cool light mix, print-ready; NOT flat cartoon, NOT clipart, NOT washed gouache",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "cartoony": {
+      "themeId": "cartoony",
+      "label": "Cartoony",
+      "labelAr": "كرتوني ثلاثي الأبعاد",
+      "fingerprint": "stylized 3D CGI children's animation",
+      "visualStyle": "stylized 3D CGI children's animation, polished feature-film quality, vibrant saturated color, soft cinematic lighting",
+      "style": {
+        "medium": "stylized 3D CGI children's animation, polished feature-film quality render, smooth clean surfaces, soft cinematic multi-source lighting",
+        "finish": "large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated primaries, soft cinematic sunlight, shallow depth of field, joyful dynamic poses, print-ready; NOT photoreal skin pores, NOT flat 2D clipart, NOT washed gouache"
+      },
+      "avoidExtras": [
+        "photoreal skin pores",
+        "flat 2D clipart",
+        "washed gouache",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft 3D-integrated caption band sharing scene palette and lighting — lettering sits in the render, not a painterly wash and not a hard white box.",
+      "compiledPromptStyleBlock": "stylized 3D CGI children's animation, smooth clean surfaces, large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated color, soft cinematic sunlight, shallow depth of field, print-ready; match style reference images; NOT photoreal, NOT flat 2D clipart",
+      "styleRefDir": "cartoony",
+      "styleRefGlob": "ref-*.png"
+    },
+    "fairytale-glow": {
+      "themeId": "fairytale-glow",
+      "label": "Fairytale Glow",
+      "labelAr": "توهج الحكايات",
+      "fingerprint": "classic hand-painted fairy-tale children's animation illustration",
+      "visualStyle": "classic soft fairy-tale children's animation illustration, warm golden light, rounded expressive faces",
+      "style": {
+        "medium": "classic hand-painted fairy-tale children's animation illustration, soft rounded character design, gentle painterly shading, warm golden sunlight",
+        "finish": "large sparkling expressive eyes, smooth gentle shading, lush saturated color, soft fluffy cloud backgrounds, wholesome magical mood, print-ready; NOT photoreal, NOT flat clipart, NOT harsh neon"
+      },
+      "avoidExtras": [
+        "photoreal skin pores",
+        "flat clipart",
+        "harsh neon",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft fairy-tale caption wash sharing warm gold and sky blues — lettering blended into painted sky or grass, not a hard white box.",
+      "compiledPromptStyleBlock": "classic hand-painted fairy-tale children's animation illustration, soft rounded character design, large sparkling expressive eyes, warm golden sunlight, lush saturated color, wholesome magical mood, print-ready; NOT photoreal, NOT flat clipart, NOT harsh neon; no studio brand names",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "feature-cgi": {
+      "themeId": "feature-cgi",
+      "label": "Feature CGI",
+      "labelAr": "ثلاثي أبعاد سينمائي",
+      "fingerprint": "polished stylized 3D CGI children's feature-film animation",
+      "visualStyle": "polished stylized 3D CGI children's feature animation, soft cinematic sunlight, shallow depth of field, vibrant saturated color",
+      "style": {
+        "medium": "polished stylized 3D CGI children's feature-film animation, smooth clean surfaces, soft cinematic multi-source lighting, shallow depth of field",
+        "finish": "large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated primaries, soft background bokeh, joyful dynamic poses, print-ready; NOT photoreal skin pores, NOT flat 2D clipart, NOT washed gouache"
+      },
+      "avoidExtras": [
+        "photoreal skin pores",
+        "flat 2D clipart",
+        "washed gouache",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft 3D-integrated caption band sharing scene palette and lighting — lettering sits in the render, not a hard white box.",
+      "compiledPromptStyleBlock": "polished stylized 3D CGI children's feature animation, smooth clean surfaces, large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated color, soft cinematic sunlight, shallow depth of field, print-ready; match style reference images; NOT photoreal, NOT flat 2D clipart; no studio brand names",
+      "styleRefDir": "feature-cgi",
+      "styleRefGlob": "ref-*.png"
+    },
+    "enchanted-glow": {
+      "themeId": "enchanted-glow",
+      "label": "Enchanted Glow",
+      "labelAr": "توهج ساحر",
+      "fingerprint": "whimsical stylized 3D fairy-tale night illustration",
+      "visualStyle": "whimsical stylized 3D fairy-tale night illustration, glowing flora, golden sparkle dust, soft bloom",
+      "style": {
+        "medium": "whimsical stylized 3D fairy-tale night illustration, soft rounded characters, cinematic soft bloom, bioluminescent and moonlit multi-source lighting",
+        "finish": "large expressive eyes, deep midnight blues and forest greens, warm golden sparkle dust, glowing flower light, wonder-filled mood, print-ready; NOT photoreal, NOT flat clipart, NOT harsh neon cyberpunk"
+      },
+      "avoidExtras": [
+        "photoreal skin pores",
+        "flat clipart",
+        "harsh neon cyberpunk",
+        "horror darkness",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft night-sky caption band in deep blue/gold palette — lettering shares moon and sparkle glow, not a hard white box.",
+      "compiledPromptStyleBlock": "whimsical stylized 3D fairy-tale night illustration, soft rounded characters, large expressive eyes, deep midnight blues, glowing flora, golden sparkle dust, soft bloom, wonder-filled mood, print-ready; match style reference images; NOT photoreal, NOT flat clipart; no studio brand names",
+      "styleRefDir": "enchanted-glow",
+      "styleRefGlob": "ref-*.png"
+    },
+    "wonder-trail": {
+      "themeId": "wonder-trail",
+      "label": "Wonder Trail",
+      "labelAr": "درب العجائب",
+      "fingerprint": "vibrant painterly children's storybook",
+      "visualStyle": "vibrant painterly children's storybook adventure illustration, golden-hour light, soft magical sparkles",
+      "style": {
+        "medium": "vibrant painterly children's storybook / animated-feature concept-art digital painting, soft visible brush texture, warm golden-hour lighting",
+        "finish": "large expressive eyes, highly saturated cheerful palette, soft magical sparkle accents, lush hills and meadows, adventure wonder mood, print-ready; NOT flat clipart, NOT washed flat gouache, NOT photoreal pores"
+      },
+      "avoidExtras": [
+        "flat clipart",
+        "washed flat gouache",
+        "photoreal skin pores",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft painted sky/grass caption wash in gold-green-blue adventure palette — lettering blended into the painting, not a hard white box.",
+      "compiledPromptStyleBlock": "vibrant painterly children's storybook adventure digital painting, soft brush texture, warm golden-hour light, large expressive eyes, saturated cheerful color, soft magical sparkles, adventure wonder mood, print-ready; match style reference images; NOT flat clipart, NOT photoreal; no studio brand names",
+      "styleRefDir": "wonder-trail",
+      "styleRefGlob": "ref-*.png"
+    },
+    "anime": {
+      "themeId": "anime",
+      "label": "Anime",
+      "labelAr": "أنيمي",
+      "fingerprint": "clean modern anime illustration",
+      "visualStyle": "clean modern anime illustration, crisp cel shading, expressive large eyes, bright skies",
+      "style": {
+        "medium": "clean modern anime illustration, crisp cel shading with clear light and shadow separation, confident dark line art, large expressive eyes with layered highlights, simple gradient skies",
+        "finish": "vivid clean color, soft bloom on highlights, detailed hair strands with glossy sheen, gentle rim light, print-ready; NOT photoreal, NOT 3D render, NOT muddy sketch"
+      },
+      "avoidExtras": [
+        "photoreal",
+        "3D render",
+        "muddy sketch",
+        "fan-service posing",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Soft cel-shaded caption band sharing the sky gradient — flat clean lettering that sits in the art, not a hard white box.",
+      "compiledPromptStyleBlock": "clean modern anime illustration, crisp cel shading, confident line art, large expressive eyes, bright gradient sky, vivid clean color, print-ready; NOT photoreal, NOT 3D; no studio brand names",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "anime-film": {
+      "themeId": "anime-film",
+      "label": "Anime Film",
+      "labelAr": "أنيمي سينمائي",
+      "fingerprint": "hand-painted cinematic anime film illustration",
+      "visualStyle": "hand-painted cinematic anime film illustration, lush painted backgrounds, warm nostalgic light",
+      "style": {
+        "medium": "hand-painted cinematic anime film illustration, lush hand-painted background scenery with visible brushwork, soft naturalistic character cel work, warm nostalgic afternoon light",
+        "finish": "rich painted skies with layered clouds, deep greens and warm ochres, gentle atmospheric haze, quiet wonder mood, print-ready; NOT photoreal, NOT flat vector, NOT harsh neon"
+      },
+      "avoidExtras": [
+        "photoreal",
+        "flat vector",
+        "harsh neon",
+        "studio brand names",
+        "living-artist imitation",
+        "named film references"
+      ],
+      "textBlendHint": "Soft painted caption blended into sky or grass, sharing the background brushwork — never a hard white box.",
+      "compiledPromptStyleBlock": "hand-painted cinematic anime film illustration, lush painted scenery, soft cel characters, warm nostalgic light, layered painted clouds, quiet wonder mood, print-ready; NOT photoreal, NOT flat vector; no studio or film names",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "watercolor": {
+      "themeId": "watercolor",
+      "label": "Watercolour",
+      "labelAr": "ألوان مائية",
+      "fingerprint": "traditional watercolour children's book illustration",
+      "visualStyle": "traditional watercolour children's book illustration, soft bleeding washes, visible paper grain",
+      "style": {
+        "medium": "traditional watercolour children's book illustration, soft bleeding pigment washes, visible cold-press paper grain, delicate ink outlines where needed, generous white space",
+        "finish": "luminous transparent layers, gentle granulation at wash edges, soft warm palette, hand-made feel, print-ready; NOT digital airbrush, NOT heavy opaque paint, NOT flat vector"
+      },
+      "avoidExtras": [
+        "digital airbrush",
+        "opaque poster paint",
+        "flat vector",
+        "harsh outlines",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic hand-lettered into a pale wash area of the paper, sharing the pigment colour — never a hard white box.",
+      "compiledPromptStyleBlock": "traditional watercolour children's book illustration, soft bleeding washes, cold-press paper grain, luminous transparent layers, delicate ink accents, print-ready; NOT digital airbrush, NOT flat vector",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "gouache-retro": {
+      "themeId": "gouache-retro",
+      "label": "Retro Gouache",
+      "labelAr": "جواش كلاسيك",
+      "fingerprint": "mid-century gouache picture-book illustration",
+      "visualStyle": "mid-century gouache picture-book illustration, flat matte shapes, limited retro palette",
+      "style": {
+        "medium": "mid-century gouache picture-book illustration, flat matte painted shapes with slightly rough edges, limited retro palette, simplified stylised figures, textured paper ground",
+        "finish": "warm mustard, teal, brick red and cream, subtle print misregistration texture, bold graphic composition, print-ready; NOT glossy 3D, NOT photoreal, NOT digital gradients"
+      },
+      "avoidExtras": [
+        "glossy 3D",
+        "photoreal",
+        "smooth digital gradients",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic set as part of the flat graphic composition on a matte colour block that belongs to the palette — never a hard white box.",
+      "compiledPromptStyleBlock": "mid-century gouache picture-book illustration, flat matte shapes, limited retro palette of mustard teal brick and cream, textured paper ground, bold graphic composition, print-ready; NOT 3D, NOT photoreal",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "papercut": {
+      "themeId": "papercut",
+      "label": "Paper Cut",
+      "labelAr": "ورق مقصوص",
+      "fingerprint": "layered cut-paper collage illustration",
+      "visualStyle": "layered cut-paper collage illustration, stacked paper depth, soft drop shadows",
+      "style": {
+        "medium": "layered cut-paper collage illustration, shapes cut from textured coloured paper and stacked in clear depth planes, soft realistic drop shadows between layers, visible paper fibre and torn edges",
+        "finish": "warm craft palette, tactile handmade feel, clean silhouette shapes, gentle directional light casting layer shadows, print-ready; NOT flat vector, NOT photoreal, NOT painted gradients"
+      },
+      "avoidExtras": [
+        "flat vector",
+        "photoreal",
+        "painted gradients",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic cut from its own sheet of coloured paper and laid on the scene with a matching soft shadow — never a hard white box.",
+      "compiledPromptStyleBlock": "layered cut-paper collage illustration, stacked textured paper planes, soft drop shadows between layers, torn fibre edges, warm craft palette, tactile handmade feel, print-ready; NOT flat vector, NOT photoreal",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "claymation": {
+      "themeId": "claymation",
+      "label": "Clay Stop-Motion",
+      "labelAr": "صلصال",
+      "fingerprint": "handmade clay stop-motion illustration",
+      "visualStyle": "handmade clay stop-motion illustration, modelling-clay characters, visible fingerprints",
+      "style": {
+        "medium": "handmade clay stop-motion illustration, characters and props modelled from soft modelling clay with visible fingerprints and tool marks, miniature built set, shallow macro depth of field",
+        "finish": "matte clay surfaces with slight sheen, chunky rounded forms, warm practical lighting like a tabletop set, cosy handmade charm, print-ready; NOT smooth CGI plastic, NOT 2D drawing, NOT photoreal humans"
+      },
+      "avoidExtras": [
+        "smooth CGI plastic",
+        "2D drawing",
+        "photoreal humans",
+        "living-artist imitation",
+        "studio brand names"
+      ],
+      "textBlendHint": "Arabic shaped from rolled clay letters resting in the set, lit by the same lamp — never a hard white box.",
+      "compiledPromptStyleBlock": "handmade clay stop-motion illustration, modelling-clay characters with fingerprints and tool marks, miniature built set, shallow macro depth of field, warm tabletop lighting, cosy handmade charm, print-ready; NOT CGI plastic, NOT 2D",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "felt-craft": {
+      "themeId": "felt-craft",
+      "label": "Felt & Fabric",
+      "labelAr": "خامات قماش",
+      "fingerprint": "handmade felt and fabric craft illustration",
+      "visualStyle": "handmade felt and fabric craft illustration, stitched textile characters, soft fibre texture",
+      "style": {
+        "medium": "handmade felt and fabric craft illustration, characters and scenery built from wool felt, cotton and embroidery with visible running stitches, button details and soft fibre fuzz, miniature textile set",
+        "finish": "warm cosy palette, tactile fuzzy surfaces, gentle soft-box lighting, shallow depth of field, storybook craft-fair charm, print-ready; NOT CGI, NOT flat vector, NOT photoreal skin"
+      },
+      "avoidExtras": [
+        "CGI render",
+        "flat vector",
+        "photoreal skin",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic embroidered in contrasting thread onto a felt banner in the scene, lit the same way — never a hard white box.",
+      "compiledPromptStyleBlock": "handmade felt and fabric craft illustration, wool felt and cotton characters with visible stitching and button details, soft fibre texture, miniature textile set, warm cosy palette, print-ready; NOT CGI, NOT flat vector",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "crayon-kid": {
+      "themeId": "crayon-kid",
+      "label": "Crayon & Pencil",
+      "labelAr": "ألوان شمع",
+      "fingerprint": "childlike crayon and coloured-pencil illustration",
+      "visualStyle": "childlike crayon and coloured-pencil illustration, waxy strokes, joyful naive shapes",
+      "style": {
+        "medium": "childlike crayon and coloured-pencil illustration, waxy directional strokes with visible paper tooth, slightly wobbly confident outlines, joyful naive proportions, generous bright colour",
+        "finish": "warm saturated crayon colour, gaps and overlaps left honest, energetic hand-drawn feel, print-ready; NOT digital vector, NOT photoreal, NOT airbrushed smoothness"
+      },
+      "avoidExtras": [
+        "digital vector",
+        "photoreal",
+        "airbrush smoothness",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic hand-written in the same crayon with the same waxy texture, sitting in an open area of the drawing — never a hard white box.",
+      "compiledPromptStyleBlock": "childlike crayon and coloured-pencil illustration, waxy strokes with paper tooth, wobbly confident outlines, joyful naive shapes, bright saturated colour, print-ready; NOT vector, NOT photoreal",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "comic-bold": {
+      "themeId": "comic-bold",
+      "label": "Bold Comic",
+      "labelAr": "كوميكس",
+      "fingerprint": "bold comic-book children's illustration",
+      "visualStyle": "bold comic-book children's illustration, heavy ink outlines, flat vivid colour",
+      "style": {
+        "medium": "bold comic-book children's illustration, heavy confident ink outlines of varying weight, flat vivid colour fills with simple cel shadows, dynamic action posing, subtle halftone dot texture",
+        "finish": "punchy primary-leaning palette, strong graphic contrast, energetic compositions, print-ready; NOT photoreal, NOT painterly rendering, NOT muted pastels"
+      },
+      "avoidExtras": [
+        "photoreal",
+        "painterly rendering",
+        "muted pastels",
+        "superhero franchise emblems",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic set in a bold clean caption panel that shares the ink line weight and flat palette — a designed comic caption, never a plain white sticker box.",
+      "compiledPromptStyleBlock": "bold comic-book children's illustration, heavy varied ink outlines, flat vivid colour, simple cel shadows, halftone dot texture, dynamic posing, print-ready; NOT photoreal, NOT painterly; no franchise emblems",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "retro-cartoon": {
+      "themeId": "retro-cartoon",
+      "label": "Retro Cartoon",
+      "labelAr": "كرتون قديم",
+      "fingerprint": "1990s hand-drawn television cartoon illustration",
+      "visualStyle": "1990s hand-drawn television cartoon illustration, clean ink and paint cels, painted backgrounds",
+      "style": {
+        "medium": "1990s hand-drawn television cartoon illustration, clean ink-and-paint character cels with simple two-tone shading, softly painted watercolour backgrounds, rounded friendly character design",
+        "finish": "warm saturated cel colour, slight film grain, nostalgic afternoon-television feel, print-ready; NOT 3D CGI, NOT photoreal, NOT modern flat vector"
+      },
+      "avoidExtras": [
+        "3D CGI",
+        "photoreal",
+        "modern flat vector",
+        "studio brand names",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic painted onto a soft cel caption band matching the background wash — never a hard white box.",
+      "compiledPromptStyleBlock": "1990s hand-drawn television cartoon illustration, ink-and-paint cels with two-tone shading, softly painted backgrounds, rounded friendly design, warm saturated colour, slight grain, print-ready; NOT 3D, NOT photoreal",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "pixel-art": {
+      "themeId": "pixel-art",
+      "label": "Pixel Art",
+      "labelAr": "بكسل",
+      "fingerprint": "detailed pixel-art scene illustration",
+      "visualStyle": "detailed pixel-art scene illustration, chunky readable pixels, limited bright palette",
+      "style": {
+        "medium": "detailed pixel-art scene illustration, chunky deliberate pixels on a consistent grid, limited bright indexed palette, clear silhouettes, simple dithering for gradients",
+        "finish": "crisp pixel edges with no blurring or anti-aliased mush, cheerful arcade palette, readable character faces despite low resolution, print-ready; NOT smooth vector, NOT photoreal, NOT blurry upscaling"
+      },
+      "avoidExtras": [
+        "smooth vector",
+        "photoreal",
+        "blurry upscaling",
+        "anti-aliased mush",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic rendered as clean modern lettering on a solid pixel-art banner — keep the Arabic itself smooth and fully legible, never pixelated into unreadable glyphs, never a hard white box.",
+      "compiledPromptStyleBlock": "detailed pixel-art scene illustration, chunky pixels on a consistent grid, limited bright indexed palette, clear silhouettes, simple dithering, crisp edges, print-ready; NOT vector, NOT photoreal, NOT blurry",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    },
+    "chalk-pastel": {
+      "themeId": "chalk-pastel",
+      "label": "Chalk & Pastel",
+      "labelAr": "طباشير",
+      "fingerprint": "soft chalk pastel illustration",
+      "visualStyle": "soft chalk pastel illustration, powdery strokes, dark toned paper",
+      "style": {
+        "medium": "soft chalk pastel illustration, powdery blended strokes with visible grain, drawn on warm mid-toned paper, soft edges with bright highlight accents pulled out on top",
+        "finish": "glowing highlights against the toned ground, velvety soft transitions, cosy dusk palette, print-ready; NOT digital airbrush, NOT hard vector edges, NOT photoreal"
+      },
+      "avoidExtras": [
+        "digital airbrush",
+        "hard vector edges",
+        "photoreal",
+        "living-artist imitation"
+      ],
+      "textBlendHint": "Arabic drawn in soft chalk on the toned paper ground with the same powdery edge — never a hard white box.",
+      "compiledPromptStyleBlock": "soft chalk pastel illustration, powdery blended strokes with visible grain, warm mid-toned paper ground, bright pulled highlights, velvety transitions, cosy dusk palette, print-ready; NOT airbrush, NOT photoreal",
+      "styleRefDir": null,
+      "styleRefGlob": null
+    }
+  }
+}
