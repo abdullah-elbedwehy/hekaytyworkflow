@@ -1,8 +1,9 @@
 # Hekayati story language system
 
 This directory is the writing reference for age-fit Egyptian-Arabic story text.
-It applies to the exact Arabic text rendered **inside the page image**. It does
-not replace `story.json`, the story-template catalog, prompt compilation, or any
+It applies to the exact Arabic caption stored in `story.json` and rendered later
+as a real, editable **PDF text layer**. Illustration images stay text-free. It
+does not replace the story-template catalog, prompt compilation, or any
 reviewer.
 
 - Machine-readable profiles: `age-profiles.json`
@@ -35,12 +36,13 @@ not an alternate target. Count Arabic word tokens after replacing the persona
 placeholder. Punctuation does not add another word.
 
 `recommendedTotalMin` and `recommendedTotalMax` assume the current 18 interior
-story pages (`page-01` through `page-18`). They exclude the cover title,
+story pages (`page-02` through `page-21`). They exclude the cover title, the
+doctrine-owned الإهداء / «قصص تانية» / back-cover copy,
 `back-cover` line, legal text, and credits. A deliberate picture-only pause can
 lower the total, but it cannot justify overloading another page.
 
-These budgets are **Hekayati product heuristics**, tuned for Arabic text inside
-generated art, page legibility, and the current 20-page book. They are not
+These budgets are **Hekayati product heuristics**, tuned for the PDF caption
+zone, page legibility, and the 20-story-page book of handoff §7. They are not
 clinical language-development norms and are not copied from a publisher.
 
 For ordinary custom-story review, missing a target page range or recommended
@@ -52,6 +54,18 @@ recommended band. The four warning codes `page-below-target`,
 `page-above-target`, `story-thinner-than-profile`, and
 `story-denser-than-profile` become completion blockers. Staying under the hard
 maximum alone is not enough.
+
+## Goal-specific proof
+
+The common causal spine is necessary but not sufficient:
+
+- `educational`: show the unwanted pattern or temptation, a visible cost, the
+  child's alternative choice/action, and later proof that the change holds.
+  If `habitFocus` exists, exact `targetBehaviorAr` must be visible in a `turn`
+  page and again in a `reinforce` page.
+- `entertainment`: establish the fantasy promise early, let obstacles escalate,
+  make the child own the decisive hero moment, and visibly deliver the ending
+  payoff. Do not turn the ending into a lesson the family did not request.
 
 ## Story spine
 
@@ -78,22 +92,23 @@ those two owners in canonical `arcStageOrder`. Undeclared double ownership,
 three owners, non-adjacent owners, and declarations on a single-owner page all
 block review. Every page still needs its own distinct `beat`.
 
-### Default 20-page placement
+### Default placement across the 20 story pages
 
-This mirrors `story-templates/catalog.json.defaultNarrativeArc`:
+The catalog's `defaultNarrativeArc` describes the **source** template (`page-01`…`page-18`); every id shifts one place right when the template is
+reshaped into the handoff §7 book, which is the numbering shown here:
 
 | Pages | Full `age-6-8` arc |
 |---|---|
 | `cover` | Promise the story, without adding new plot facts |
-| `page-01` to `page-02` | `setup` |
-| `page-03` | `disruption` |
-| `page-04` to `page-05` | `goal` |
-| `page-06` to `page-10` | `attempts` |
-| `page-11` to `page-12` | `setback` |
-| `page-13` | `clue` |
-| `page-14` | `choice` |
-| `page-15` to `page-17` | `decisiveAction` |
-| `page-18` | `payoff` |
+| `page-02` to `page-03` | `setup` |
+| `page-04` | `disruption` |
+| `page-05` to `page-06` | `goal` |
+| `page-07` to `page-11` | `attempts` |
+| `page-12` to `page-13` | `setback` |
+| `page-14` | `clue` |
+| `page-15` | `choice` |
+| `page-16` to `page-18` | `decisiveAction` |
+| `page-19` to `page-21` | `payoff` |
 | `back-cover` | `resolution`: one warm emotional echo; no new event or lecture |
 
 For `age-1-2`, use one small attempt and an immediate visible payoff. For
@@ -146,8 +161,9 @@ it a real causal job.
 - Do not replace consequence with coincidence, a sudden unseeded power, or a
   late "it was a dream" reset.
 - Use `فجأة` at most once, only for a genuine turning point.
-- End with changed behavior or a repaired relationship. Do not paste a moral
-  paragraph after the plot is already over.
+- End with the goal's proof: changed behaviour/repaired relationship for an
+  educational story, or the promised fantasy payoff for entertainment. Do not
+  paste a moral paragraph after the plot is already over.
 
 ## Clear Egyptian-Arabic text
 
@@ -250,7 +266,10 @@ Reject or rewrite a story when any of these is true:
   bridge, or `transitionFromPrevious` points to wording absent from `page.text`.
 - A helper, prop, clue, power, or solution appears without setup.
 - An adult, guest, narrator, coincidence, or magic object solves the climax for the child.
-- A moral is stated instead of demonstrated by the hero's choice and payoff.
+- An educational moral is stated instead of demonstrated by the hero's choice
+  and later proof.
+- An entertainment story fails to deliver its fantasy promise, lets a guest
+  own the climax, or adds a corrective lesson as the real ending.
 - The story mixes Egyptian with unexplained MSA or another Arabic dialect.
 - Pronouns, time, location, outfit, object ownership, or emotional state drift.
 - Text contradicts the intended picture.

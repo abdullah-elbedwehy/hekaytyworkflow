@@ -1,0 +1,24 @@
+{
+  "rightToLeft": true,
+  "readableLineLength": true,
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "attachmentFolderPath": "./",
+  "showUnsupportedFiles": true,
+  "strictLineBreaks": false,
+  "showLineNumber": false,
+  "spellcheck": false,
+  "livePreview": true,
+  "userIgnoreFilters": [
+    ".venv/",
+    ".git/",
+    "node_modules/",
+    "__pycache__/",
+    ".pytest_cache/",
+    "tools/.corpus/",
+    "output/images/",
+    "output/renders/",
+    "output/contact-sheets/"
+  ]
+}

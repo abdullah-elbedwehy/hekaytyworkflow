@@ -18,13 +18,46 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+# Sibling module (tools/scripts/textlayout.py). Works both when run as a script
+# (its dir is sys.path[0]) and when tests load this file by path via importlib.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from textlayout import (  # noqa: E402
+    FONT_ENV_VAR,
+    TextLayoutError,
+    layout_caption,
+    missing_glyphs,
+    resolve_arabic_font,
+    safe_zone_prompt_clause,
+    safe_zone_rect,
+)
+import promptdepth  # noqa: E402
+import doctrine  # noqa: E402
+import manual_dispatch  # noqa: E402
+import obsidian_vault  # noqa: E402
+from progress import book_progress  # noqa: E402
+from story_review import (  # noqa: E402
+    apply_story_review,
+    normalized_markdown_sha256,
+    parse_story_review,
+    render_story_review,
+)
+
 SCHEMA_VERSION = 1
-DEFAULT_PDF_PAGES = 24  # front cover + 22 story pages + back cover
-MIN_PDF_PAGES = 3  # cover + >=1 story page + back cover
+# handoff §7 — 22 interior pages (dedication + 20 story + «قصص تانية») plus two
+# separate covers. The doctrine owns the number; this constant only mirrors it.
+DEFAULT_PDF_PAGES = doctrine.doctrine_pdf_page_count()
+BOOK_STRUCTURE_ID = doctrine.BOOK_STRUCTURE_ID
+# Floor for the id builder itself. The real shape is enforced by the doctrine
+# gate in review-story, which requires the full 22+2 book before any lock.
+MIN_PDF_PAGES = 3
 MAX_PDF_PAGES = 40
 REVIEWER_ROLES = {"story", "arabic", "continuity", "pdf"}
 MAX_ATTEMPTS = 3
@@ -230,6 +263,41 @@ MIN_LOCATIONS = 1
 MAX_LOCATIONS = 8
 MIN_LOCATION_DEFINITION_CHARS = 120
 
+# --- Moral spine -----------------------------------------------------------
+# The family chooses the book's job before choosing a plot. Educational stories
+# prove a value or replacement behaviour; entertainment stories deliver a
+# fantasy wish and a child-owned hero moment without smuggling in a lesson.
+STORY_TEMPLATE_SCHEMA_VERSION = 3
+STORY_INTENTS = {"educational", "entertainment"}
+STORY_TEMPLATE_QUALITY_STATUSES = {"ready", "needs-revision"}
+MORAL_FIELDS = ("premise", "temptation", "cost", "endingProof")
+ENTERTAINMENT_FIELDS = (
+    "fantasyPromiseAr",
+    "heroWantAr",
+    "stakesAr",
+    "heroMomentAr",
+    "endingPayoffAr",
+)
+MIN_MORAL_FIELD_CHARS = 25
+MIN_STORY_GOAL_CHARS = 8
+MIN_PAGE_BECAUSE_CHARS = 10
+# The arc stage where the hero chooses the costly path; the whole moral hinges
+# on it, so it is the one stage a value-driven template may never omit.
+MORAL_CHOICE_STAGE = "choice"
+
+# A children's story teaches by consequence, not by announcement. These openers
+# are how a page turns into a lecture, so they are rejected in page text.
+PREACHY_PATTERNS = (
+    re.compile(r"\bالدرس\b"),
+    re.compile(r"\bالعبرة\b"),
+    re.compile(r"\bالمغزى\b"),
+    re.compile(r"يجب\s+عل[ىي]"),
+    re.compile(r"ينبغي\s+عل[ىي]"),
+    re.compile(r"لازم\s+(?:كل\s+)?واحد"),
+    re.compile(r"(?:ن|ات)علّ?م(?:نا)?\s+(?:من\s+)?(?:ده|كده|دي)"),
+    re.compile(r"عشان\s+كده\s+لازم"),
+)
+
 # A thin guest description is the main reason the image model falls back on a
 # franchise character it already knows — and then refuses the job.
 MIN_GUEST_DESCRIPTION_CHARS = 120
@@ -241,6 +309,10 @@ MAX_CODEX_REFS = 8
 # Concurrency ceiling for Codex image sessions. Measured: 20 parallel ref-heavy
 # page jobs timed out 20/22; a smaller pool completes the same queue faster.
 MAX_CODEX_WORKERS = 6
+# In-wave retries for jobs that came back empty. One is the sweet spot: image
+# flakes are usually transient, and a second failure means the prompt is wrong,
+# which a retry cannot fix.
+DEFAULT_WAVE_RETRIES = 1
 CODEX_TIMEOUT_BASE_SEC = 900
 CODEX_TIMEOUT_CEILING_SEC = 3600
 
@@ -256,6 +328,8 @@ COVER_SAMPLE_REFS = 2
 MIN_COMPILED_PROMPT_CHARS = 320
 MAX_COMPILED_PROMPT_CHARS = 3600
 
+STORY_REVIEW_RELATIVE_PATH = "input/story-review.md"
+
 
 class WorkflowError(RuntimeError):
     pass
@@ -269,7 +343,7 @@ def build_pdf_asset_ids(total_pages: int) -> list[str]:
     """
     if total_pages < MIN_PDF_PAGES:
         raise WorkflowError(
-            f"pdfPageCount must be >= {MIN_PDF_PAGES} (cover + story + back cover)"
+            f"pdfPageCount must be >= {MIN_PDF_PAGES} (cover + dedication + story + other-stories + back cover)"
         )
     if total_pages > MAX_PDF_PAGES:
         raise WorkflowError(f"pdfPageCount must be <= {MAX_PDF_PAGES}")
@@ -334,12 +408,23 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    # A fixed `.name.tmp` races when two commands touch the same project. Use a
+    # unique sibling file so each writer either wins atomically or leaves its
+    # own recoverable temp; it can never replace another writer's half-file.
+    fd, raw_tmp = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
     )
-    os.replace(tmp, path)
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def sha256(path: Path) -> str:
@@ -348,6 +433,125 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def atomic_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def story_review_path(project: Path, book: dict[str, Any] | None = None) -> Path:
+    relative = STORY_REVIEW_RELATIVE_PATH
+    if isinstance(book, dict):
+        state = book.get("storyReview")
+        if isinstance(state, dict) and isinstance(state.get("path"), str):
+            relative = state["path"]
+    candidate = (project / relative).resolve()
+    if not path_is_within(candidate, project):
+        raise WorkflowError("storyReview.path must stay inside the client project")
+    return candidate
+
+
+def story_review_status(
+    project: Path,
+    book: dict[str, Any],
+    *,
+    source: Path | None = None,
+) -> dict[str, Any]:
+    state = book.get("storyReview")
+    review_path = story_review_path(project, book)
+    story_path = source or input_dir(project) / "story.json"
+    if not isinstance(state, dict) or not state.get("preparedStorySha256"):
+        return {
+            "status": "not_prepared",
+            "path": str(review_path),
+            "storyPath": str(story_path),
+            "nextAction": "Run prepare-story-review after the internal story checks pass.",
+        }
+    if not story_path.is_file():
+        status = "story_missing"
+        story_hash = None
+    else:
+        story_hash = sha256(story_path)
+        status = str(state.get("status") or "awaiting_user")
+    if not review_path.is_file():
+        return {
+            **copy.deepcopy(state),
+            "status": "review_file_missing",
+            "path": str(review_path),
+            "storyPath": str(story_path),
+            "storySha256": story_hash,
+            "nextAction": "Restore the review file or run prepare-story-review --force.",
+        }
+    review_hash = normalized_markdown_sha256(
+        review_path.read_text(encoding="utf-8")
+    )
+    if story_hash != state.get("preparedStorySha256") and not state.get(
+        "approvedStorySha256"
+    ):
+        status = "stale"
+    elif state.get("approvedStorySha256"):
+        if (
+            story_hash == state.get("approvedStorySha256")
+            and review_hash == state.get("approvedReviewSha256")
+        ):
+            status = "approved"
+        else:
+            status = "stale"
+    elif review_hash != state.get("preparedReviewSha256"):
+        status = "changes_detected"
+    else:
+        status = "awaiting_user"
+    next_actions = {
+        "approved": "Run lock-story, then write prompts.",
+        "awaiting_user": "Open story-review.md in Obsidian, review every page, then tell the agent when done.",
+        "changes_detected": "Review edits found. Run approve-story-review with the user's statement.",
+        "stale": "Story or review changed after its snapshot. Prepare a fresh review before continuing.",
+    }
+    return {
+        **copy.deepcopy(state),
+        "status": status,
+        "path": str(review_path),
+        "storyPath": str(story_path),
+        "storySha256": story_hash,
+        "reviewSha256": review_hash,
+        "nextAction": next_actions.get(status, "Prepare the story review again."),
+    }
+
+
+def require_story_review_approved(
+    project: Path,
+    book: dict[str, Any],
+    *,
+    source: Path | None = None,
+) -> dict[str, Any]:
+    status = story_review_status(project, book, source=source)
+    if status.get("status") != "approved":
+        raise WorkflowError(
+            "Story review is not currently approved "
+            f"(status={status.get('status')}). {status.get('nextAction')} "
+            f"Review file: {status.get('path')}"
+        )
+    return status
 
 
 def input_dir(project: Path) -> Path:
@@ -798,11 +1002,14 @@ def load_story_templates_catalog() -> dict[str, Any]:
     """Load and validate the ready-made story-template catalog."""
     path = story_templates_catalog_path()
     catalog = read_json(path)
-    if catalog.get("schemaVersion") != 1:
+    if catalog.get("schemaVersion") != STORY_TEMPLATE_SCHEMA_VERSION:
         raise WorkflowError(
             f"Unsupported story-template schemaVersion in {path}: "
-            f"{catalog.get('schemaVersion')!r}"
+            f"{catalog.get('schemaVersion')!r} "
+            f"(expected {STORY_TEMPLATE_SCHEMA_VERSION}). Version 3 added "
+            "educational/entertainment intent plus explicit quality quarantine."
         )
+    moral_values = load_morals_catalog()["values"]
     templates = catalog.get("templates")
     if not isinstance(templates, dict) or not templates:
         raise WorkflowError(f"Invalid story-template catalog (empty templates): {path}")
@@ -837,6 +1044,32 @@ def load_story_templates_catalog() -> dict[str, Any]:
                 raise WorkflowError(
                     f"story-template {template_id!r} missing non-empty {field}"
                 )
+        story_intent = template.get("storyIntent")
+        if story_intent not in STORY_INTENTS:
+            raise WorkflowError(
+                f"story-template {template_id!r}.storyIntent must be one of "
+                f"{', '.join(sorted(STORY_INTENTS))}"
+            )
+        quality_status = template.get("qualityStatus")
+        if quality_status not in STORY_TEMPLATE_QUALITY_STATUSES:
+            raise WorkflowError(
+                f"story-template {template_id!r}.qualityStatus must be one of "
+                f"{', '.join(sorted(STORY_TEMPLATE_QUALITY_STATUSES))}"
+            )
+        quality_issues = template.get("qualityIssuesAr") or []
+        if (
+            not isinstance(quality_issues, list)
+            or any(
+                not isinstance(value, str) or not value.strip()
+                for value in quality_issues
+            )
+            or (quality_status == "needs-revision" and not quality_issues)
+            or (quality_status == "ready" and quality_issues)
+        ):
+            raise WorkflowError(
+                f"story-template {template_id!r}.qualityIssuesAr must be empty "
+                "for ready entries and explain every needs-revision status"
+            )
         age_range = template.get("ageRange")
         if (
             not isinstance(age_range, dict)
@@ -1078,7 +1311,145 @@ def load_story_templates_catalog() -> dict[str, Any]:
                     f"story-template {template_id!r}/{page.get('id')} references "
                     f"unknown locationId {page.get('locationId')!r}"
                 )
+        validate_template_intent(
+            template_id, template, moral_values, arc, expected_ids
+        )
     return catalog
+
+
+def morals_catalog_path() -> Path:
+    return tools_root() / "references" / "morals" / "catalog.json"
+
+
+def load_morals_catalog() -> dict[str, Any]:
+    """Load and validate the value taxonomy the templates bind to."""
+    path = morals_catalog_path()
+    catalog = read_json(path)
+    if catalog.get("schemaVersion") != 1:
+        raise WorkflowError(
+            f"Unsupported morals schemaVersion in {path}: "
+            f"{catalog.get('schemaVersion')!r}"
+        )
+    values = catalog.get("values")
+    if not isinstance(values, dict) or not values:
+        raise WorkflowError(f"Invalid morals catalog (no values): {path}")
+    for value_id, entry in values.items():
+        if not isinstance(entry, dict) or entry.get("valueId") != value_id:
+            raise WorkflowError(f"morals catalog key/id mismatch: {value_id!r}")
+        for field in ("labelAr", "labelEn", "lessonAr", "antiPatternAr", "provenByAr"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                raise WorkflowError(
+                    f"morals value {value_id!r} missing non-empty {field}"
+                )
+    return catalog
+
+
+def preachy_hits(text: str) -> list[str]:
+    """Phrases that turn a story page into a lecture."""
+    folded = str(text or "")
+    return [
+        pattern.pattern
+        for pattern in PREACHY_PATTERNS
+        if pattern.search(folded)
+    ]
+
+
+def validate_template_intent(
+    template_id: str,
+    template: dict[str, Any],
+    moral_values: dict[str, Any],
+    arc: dict[str, Any],
+    expected_ids: list[str],
+) -> None:
+    """Enforce the selected educational or entertainment promise.
+
+    Both routes need a causal child-owned arc. Educational templates additionally
+    prove a value through temptation/cost/proof. Entertainment templates instead
+    name the fantasy promise, stakes, hero moment, and visible payoff.
+    """
+    story_intent = template.get("storyIntent")
+    if story_intent == "entertainment":
+        entertainment = template.get("entertainment")
+        if not isinstance(entertainment, dict):
+            raise WorkflowError(
+                f"story-template {template_id!r} needs an entertainment block"
+            )
+        for field in ENTERTAINMENT_FIELDS:
+            value = entertainment.get(field)
+            if not isinstance(value, str) or len(value.strip()) < MIN_STORY_GOAL_CHARS:
+                raise WorkflowError(
+                    f"story-template {template_id!r}.entertainment.{field} needs "
+                    f"{MIN_STORY_GOAL_CHARS}+ chars"
+                )
+        if not arc.get("choice") or not arc.get("decisiveAction"):
+            raise WorkflowError(
+                f"story-template {template_id!r} must give the child a choice and "
+                "decisiveAction even when the goal is pure fun"
+            )
+        return
+
+    moral = template.get("moral")
+    if not isinstance(moral, dict):
+        raise WorkflowError(
+            f"story-template {template_id!r} needs a moral block — a ready-made "
+            "story must declare the value it proves"
+        )
+    value_id = moral.get("valueId")
+    if value_id not in moral_values:
+        raise WorkflowError(
+            f"story-template {template_id!r} has unknown moral.valueId "
+            f"{value_id!r}. Known: {', '.join(sorted(moral_values))}"
+        )
+    for field in ("lessonAr", "antiPatternAr"):
+        if not isinstance(moral.get(field), str) or not moral[field].strip():
+            raise WorkflowError(
+                f"story-template {template_id!r} moral.{field} must be non-empty"
+            )
+    provenance = moral.get("provenance")
+    if not isinstance(provenance, dict) or provenance.get("adapted") is not True:
+        raise WorkflowError(
+            f"story-template {template_id!r} moral.provenance must record where "
+            "the value came from and mark adapted:true — the prose is ours, the "
+            "value is inherited"
+        )
+
+    for field in MORAL_FIELDS:
+        value = template.get(field)
+        if not isinstance(value, str) or len(value.strip()) < MIN_MORAL_FIELD_CHARS:
+            raise WorkflowError(
+                f"story-template {template_id!r}.{field} needs "
+                f"{MIN_MORAL_FIELD_CHARS}+ chars. Without it the story has no "
+                "spine: no temptation, no cost, nothing proving the lesson"
+            )
+
+    if not arc.get(MORAL_CHOICE_STAGE):
+        raise WorkflowError(
+            f"story-template {template_id!r} narrativeArc has no "
+            f"{MORAL_CHOICE_STAGE!r} stage — the value is never chosen, only "
+            "narrated"
+        )
+
+    interior_ids = set(expected_ids[1:-1])
+    for page in template["pages"]:
+        page_id = page.get("id")
+        because = page.get("because")
+        if page_id != expected_ids[0] and (
+            not isinstance(because, str)
+            or len(because.strip()) < MIN_PAGE_BECAUSE_CHARS
+        ):
+            raise WorkflowError(
+                f"story-template {template_id!r}/{page_id} needs a `because` "
+                "linking it to the page before — a page that follows for no "
+                "reason breaks the causal spine"
+            )
+        if page_id in interior_ids:
+            hits = preachy_hits(page.get("text"))
+            if hits:
+                raise WorkflowError(
+                    f"story-template {template_id!r}/{page_id} states the lesson "
+                    f"instead of showing it ({', '.join(hits)}). Interior pages "
+                    "prove the value through what happens"
+                )
 
 
 def get_story_template(template_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1092,15 +1463,36 @@ def get_story_template(template_id: str) -> tuple[dict[str, Any], dict[str, Any]
     return catalog, templates[template_id]
 
 
+def moral_label(template: dict[str, Any]) -> str:
+    """Arabic name of the value this template proves, from the morals catalog."""
+    value_id = (template.get("moral") or {}).get("valueId")
+    entry = load_morals_catalog()["values"].get(str(value_id)) or {}
+    return str(entry.get("labelAr") or "")
+
+
 def story_template_summary(template: dict[str, Any]) -> dict[str, Any]:
+    story_intent = str(template.get("storyIntent") or "")
+    entertainment = (
+        template.get("entertainment")
+        if isinstance(template.get("entertainment"), dict)
+        else {}
+    )
     return {
         "templateId": template["templateId"],
         "titleAr": resolve_template_text(template["titleAr"], "بطلك"),
         "titleEn": template["titleEn"],
         "category": template["category"],
+        "storyIntent": story_intent,
+        "qualityStatus": template.get("qualityStatus"),
         "ageRange": template.get("ageRange"),
         "summaryAr": resolve_template_text(template["summaryAr"], "بطلك"),
         "purpose": template["purpose"],
+        # The family picks a book by what it teaches, so the menu leads with the
+        # value rather than making them infer it from the plot summary.
+        "valueId": (template.get("moral") or {}).get("valueId"),
+        "valueAr": moral_label(template),
+        "lessonAr": (template.get("moral") or {}).get("lessonAr"),
+        "fantasyPromiseAr": entertainment.get("fantasyPromiseAr"),
         "tagsAr": template.get("tagsAr") or [],
         "pageCount": template["pageCount"],
     }
@@ -1151,6 +1543,7 @@ def normalize_template_note(note: Any) -> str | None:
 TEMPLATE_SELECTION_STATE_FIELDS = (
     "templateId",
     "titleAr",
+    "storyIntent",
     "catalogVersion",
     "appliedAt",
     "customizationNote",
@@ -1161,6 +1554,8 @@ TEMPLATE_SELECTION_STATE_FIELDS = (
     "requiresRevision",
     "ageAdaptedAt",
     "customizedAt",
+    "structureId",
+    "requiresStructureExpansion",
 )
 
 
@@ -1208,6 +1603,7 @@ def validate_template_selection_integrity(
     text_fields = (
         "templateId",
         "titleAr",
+        "storyIntent",
         "appliedAt",
         "sourceLanguageProfileId",
         "targetLanguageProfileId",
@@ -1244,6 +1640,25 @@ def validate_template_selection_integrity(
         ):
             raise WorkflowError(f"Template selection {field} is invalid")
     return copy.deepcopy(canonical)
+
+
+def story_goal_from_template(
+    template: dict[str, Any], hero_name: str
+) -> dict[str, Any]:
+    """Resolve the customer-facing job of one ready-made story."""
+    mode = str(template.get("storyIntent") or "").strip()
+    if mode == "educational":
+        raw_goal = (
+            (template.get("moral") or {}).get("lessonAr")
+            or template.get("purpose")
+        )
+    else:
+        raw_goal = (
+            (template.get("entertainment") or {}).get("fantasyPromiseAr")
+            or template.get("purpose")
+        )
+    goal_ar = resolve_template_text(str(raw_goal or ""), hero_name)
+    return {"mode": mode, "goalAr": goal_ar, "updatedAt": now_iso()}
 
 
 def validate_template_language_target(
@@ -1902,10 +2317,92 @@ def next_first_pass_asset(book: dict[str, Any]) -> str | None:
     return None
 
 
+def normalize_story_goal(mode: Any, goal_ar: Any) -> dict[str, Any]:
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode not in STORY_INTENTS:
+        raise WorkflowError(
+            "Story goal mode must be educational or entertainment"
+        )
+    if not isinstance(goal_ar, str) or len(goal_ar.strip()) < MIN_STORY_GOAL_CHARS:
+        raise WorkflowError(
+            f"Story goal text must be {MIN_STORY_GOAL_CHARS}+ characters"
+        )
+    return {
+        "mode": normalized_mode,
+        "goalAr": goal_ar.strip(),
+        "updatedAt": now_iso(),
+    }
+
+
+def command_set_story_goal(args: argparse.Namespace) -> dict[str, Any]:
+    """Choose educational vs entertainment before plot/template selection."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    if book.get("storyPath"):
+        raise WorkflowError(
+            "Story goal is frozen after lock-story. Start a new book for a "
+            "different goal."
+        )
+    brief_path = input_dir(project) / "brief.json"
+    brief = read_json(brief_path)
+    goal = normalize_story_goal(args.mode, args.goal)
+    focus = ((brief.get("personalization") or {}).get("habitFocus"))
+    if goal["mode"] == "entertainment" and focus:
+        raise WorkflowError(
+            "This brief already has a habitFocus. Keep educational mode or "
+            "remove the habit personalization before choosing pure entertainment."
+        )
+    selection = brief.get("templateSelection")
+    if isinstance(selection, dict) and selection.get("storyIntent") != goal["mode"]:
+        raise WorkflowError(
+            f"The selected template is {selection.get('storyIntent')}; choose a "
+            "matching goal or replace the template draft first."
+        )
+    brief["storyGoal"] = copy.deepcopy(goal)
+    atomic_json(brief_path, brief)
+
+    story_path = input_dir(project) / "story.json"
+    story_updated = False
+    if story_path.is_file():
+        story = read_json(story_path)
+        story["storyGoal"] = copy.deepcopy(goal)
+        atomic_json(story_path, story)
+        story_updated = True
+
+    book["storyGoal"] = copy.deepcopy(goal)
+    if goal["mode"] == "educational":
+        book["nextAction"] = (
+            "Run set-story-type --type A (تصحيح سلوك: رفيق سحري + انتكاسة) or "
+            "--type B (تشجيع على مكان: أصحاب حقيقيين بدون رفيق سحري). Then "
+            "capture one habit + replacement behaviour with set-personalization, "
+            "or choose a ready educational value template."
+        )
+    else:
+        book["nextAction"] = (
+            "Run set-story-type --type C (مغامرة خيالية). Then choose an "
+            "entertainment template or a safe guest archetype and write a "
+            "wish-fulfilment adventure with the child owning the climax."
+        )
+    save_book(project, book)
+    return {
+        "storyGoal": goal,
+        "briefUpdated": True,
+        "storyUpdated": story_updated,
+        "nextAction": book["nextAction"],
+    }
+
+
 def command_init(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     if not project.is_dir():
         raise WorkflowError(f"Project folder does not exist: {project}")
+    workflow_root = tools_root().parent
+    if path_is_within(project, workflow_root):
+        raise WorkflowError(
+            "Client projects cannot live inside the hekaytyworkflow Git repository. "
+            "Choose a separate absolute folder so child photos and generated books "
+            "cannot be committed by mistake."
+        )
     if manifest_path(project).exists():
         raise WorkflowError(f"Project already initialized: {project}")
 
@@ -1940,7 +2437,8 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "language": "natural Egyptian Arabic",
         "targetAge": default_target_age,
         "languageProfileId": language_profile["id"],
-        "purpose": "adventure",
+        "purpose": None,
+        "storyGoal": None,
         "pageCount": page_count,
         "title": None,
         "outline": None,
@@ -1990,7 +2488,7 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "settings": {
             "pdfPageCount": page_count,
             "storyPageCount": story_page_count,
-            "textInPixels": True,
+            "bookStructure": BOOK_STRUCTURE_ID,
             "maxAttemptsPerAsset": MAX_ATTEMPTS,
             "promptsAreJson": True,
             "imageProvider": "codex",
@@ -2007,7 +2505,13 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "interviewPath": "input/interview.md",
         "requirementsPath": "input/requirements.md",
         "storyPath": None,
+        "storyReview": {
+            "status": "not_prepared",
+            "path": STORY_REVIEW_RELATIVE_PATH,
+            "revision": 0,
+        },
         "templateSelection": None,
+        "storyGoal": None,
         "assets": assets,
         "review": {
             "status": "not_started",
@@ -2015,27 +2519,45 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
             "mergedReviewPaths": [],
             "fixQueue": [],
             "manualReview": [],
+            "storyFixes": [],
+            "pdfFixes": [],
+            "imageFixes": [],
         },
         "pdf": {
             "draft": {"status": "planned", "path": None, "sha256": None},
             "final": {"status": "planned", "path": None, "sha256": None},
         },
+        "finalApproval": {
+            "status": "not_approved",
+            "approvedAt": None,
+            "statement": None,
+            "draftSha256": None,
+            "storySha256": None,
+        },
         "nextAsset": None,
         "nextAction": (
-            "Choose a ready-made story with list-templates/apply-template, or "
-            "interview the user for a custom story (log Q&A in input/interview.md). "
-            "Then write/review input/story.json and lock-story."
+            "Ask whether the book is educational or entertainment, then run "
+            "set-story-goal followed by set-story-type (A/B/C, handoff §5). "
+            "Only after that show matching templates or start the custom "
+            "interview."
         ),
     }
     save_book(project, book)
+    # The review gate asks the family to edit Markdown, so the folder is made a
+    # real Obsidian vault at init rather than after they have already opened it
+    # as a bare directory.
+    vault = obsidian_vault.scaffold_client_vault(project, book)
+    structure = doctrine.structure_slots(page_count)
     return {
         "project": str(project),
         "personas": personas,
         "pageCount": page_count,
         "pdfAssetIds": pdf_asset_ids,
+        "bookStructure": structure,
         "brief": str(input_dir(project) / "brief.json"),
         "interview": str(interview_path),
         "requirements": str(requirements_path),
+        "vault": vault,
         "nextAction": book["nextAction"],
     }
 
@@ -2116,6 +2638,90 @@ def command_confirm_consent(args: argparse.Namespace) -> dict[str, Any]:
     return {"consent": "confirmed", "nextAction": book["nextAction"]}
 
 
+THEME_REFS_MANIFEST = ".hekayati-theme-refs.json"
+
+
+def sync_theme_style_refs(
+    project: Path,
+    *,
+    theme_id: str,
+    theme: dict[str, Any],
+    previous_theme_id: str | None,
+) -> tuple[list[str], list[str]]:
+    """Replace only workflow-managed theme refs; preserve every user ref."""
+    destination_dir = style_dir(project)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = destination_dir / THEME_REFS_MANIFEST
+    managed_names: list[str] = []
+    if manifest_path.is_file():
+        manifest = read_json(manifest_path)
+        raw_names = manifest.get("files") if isinstance(manifest, dict) else None
+        if not isinstance(raw_names, list) or any(
+            not isinstance(name, str) or Path(name).name != name for name in raw_names
+        ):
+            raise WorkflowError(f"Unsafe theme-ref manifest: {manifest_path}")
+        managed_names = list(raw_names)
+    elif previous_theme_id:
+        # One-time migration from the old unmanifested copy behavior. Delete a
+        # legacy filename only when its bytes still exactly match the catalog
+        # source; a user-edited file is preserved.
+        try:
+            previous = get_theme(previous_theme_id)
+        except WorkflowError:
+            previous = {}
+        previous_dir = previous.get("styleRefDir")
+        if isinstance(previous_dir, str) and previous_dir.strip():
+            source_root = tools_root() / "references" / "themes" / previous_dir.strip()
+            source_glob = str(previous.get("styleRefGlob") or "ref-*")
+            for source in sorted(source_root.glob(source_glob)):
+                legacy = destination_dir / source.name
+                if (
+                    source.is_file()
+                    and legacy.is_file()
+                    and source.suffix.lower() in IMAGE_SUFFIXES
+                    and sha256(source) == sha256(legacy)
+                ):
+                    managed_names.append(legacy.name)
+
+    sources: list[Path] = []
+    source_dir = theme.get("styleRefDir")
+    source_glob = str(theme.get("styleRefGlob") or "ref-*")
+    if isinstance(source_dir, str) and source_dir.strip():
+        source_root = tools_root() / "references" / "themes" / source_dir.strip()
+        if not source_root.is_dir():
+            raise WorkflowError(f"Theme style ref dir missing: {source_root}")
+        sources = [
+            source
+            for source in sorted(source_root.glob(source_glob))
+            if source.is_file() and source.suffix.lower() in IMAGE_SUFFIXES
+        ]
+
+    copied: list[str] = []
+    next_names: list[str] = []
+    for source in sources:
+        target_name = f"theme-{theme_id}-{source.name}"
+        target = destination_dir / target_name
+        atomic_copy(source, target)
+        copied.append(str(target))
+        next_names.append(target_name)
+
+    removed: list[str] = []
+    for name in managed_names:
+        if name in next_names:
+            continue
+        target = (destination_dir / name).resolve()
+        if not path_is_within(target, destination_dir):
+            raise WorkflowError(f"Unsafe managed theme-ref path: {name!r}")
+        if target.is_file() or target.is_symlink():
+            target.unlink()
+            removed.append(str(target))
+    atomic_json(
+        manifest_path,
+        {"themeId": theme_id, "files": next_names, "updatedAt": now_iso()},
+    )
+    return copied, removed
+
+
 def command_apply_theme(args: argparse.Namespace) -> dict[str, Any]:
     """Set brief/story themeId + visualStyle from catalog; copy theme style refs."""
     project = require_absolute(args.project, "project")
@@ -2129,10 +2735,25 @@ def command_apply_theme(args: argparse.Namespace) -> dict[str, Any]:
     if not brief_path.is_file():
         raise WorkflowError(f"Missing brief.json — run init first: {brief_path}")
     brief = read_json(brief_path)
+    previous_theme_id = (
+        str(brief.get("themeId")).strip() if brief.get("themeId") else None
+    )
     book_path = output_dir(project) / "book.json"
     book = load_book(project) if book_path.is_file() else None
     validated_story: dict[str, Any] | None = None
     if book is not None:
+        if book.get("storyPath"):
+            raise WorkflowError(
+                "Cannot change the art theme after lock-story. Start a new client "
+                "project so approved text, prompts, and images stay in sync."
+            )
+        review_state = book.get("storyReview") or {}
+        if review_state.get("preparedStorySha256"):
+            raise WorkflowError(
+                "Choose the art theme before prepare-story-review. The user review "
+                "already snapshots this story; use a fresh review revision instead "
+                "of changing its visual contract underneath it."
+            )
         _selection, validated_story = load_validated_template_state_if_present(
             project, book, brief
         )
@@ -2151,23 +2772,12 @@ def command_apply_theme(args: argparse.Namespace) -> dict[str, Any]:
         atomic_json(story_path, story)
         story_updated = True
 
-    copied: list[str] = []
-    style_ref_dir = theme.get("styleRefDir")
-    style_ref_glob = theme.get("styleRefGlob") or "ref-*"
-    if isinstance(style_ref_dir, str) and style_ref_dir.strip():
-        src_root = (
-            tools_root() / "references" / "themes" / style_ref_dir.strip()
-        )
-        if not src_root.is_dir():
-            raise WorkflowError(f"Theme style ref dir missing: {src_root}")
-        dest = style_dir(project)
-        dest.mkdir(parents=True, exist_ok=True)
-        for src in sorted(src_root.glob(str(style_ref_glob))):
-            if not src.is_file() or src.suffix.lower() not in IMAGE_SUFFIXES:
-                continue
-            target = dest / src.name
-            shutil.copy2(src, target)
-            copied.append(str(target))
+    copied, removed = sync_theme_style_refs(
+        project,
+        theme_id=theme_id,
+        theme=theme,
+        previous_theme_id=previous_theme_id,
+    )
 
     next_action = (
         f"Paste themes/catalog.json[{theme_id}].style into every prompt; "
@@ -2190,6 +2800,7 @@ def command_apply_theme(args: argparse.Namespace) -> dict[str, Any]:
         "briefUpdated": True,
         "storyUpdated": story_updated,
         "styleRefsCopied": copied,
+        "styleRefsRemoved": removed,
         "nextAction": next_action,
     }
 
@@ -2197,10 +2808,19 @@ def command_apply_theme(args: argparse.Namespace) -> dict[str, Any]:
 def command_list_templates(args: argparse.Namespace) -> dict[str, Any]:
     catalog = load_story_templates_catalog()
     category = str(getattr(args, "category", "") or "").strip().lower()
+    intent = str(getattr(args, "intent", "") or "").strip().lower()
+    include_drafts = bool(getattr(args, "include_drafts", False))
+    if intent and intent not in STORY_INTENTS:
+        raise WorkflowError(
+            f"Unknown story intent {intent!r}. Allowed: "
+            f"{', '.join(sorted(STORY_INTENTS))}"
+        )
     templates = [
         story_template_summary(template)
         for template in catalog["templates"].values()
-        if not category or str(template.get("category", "")).lower() == category
+        if (include_drafts or template.get("qualityStatus") == "ready")
+        and (not intent or template.get("storyIntent") == intent)
+        and (not category or str(template.get("category", "")).lower() == category)
     ]
     if category and not templates:
         categories = sorted(
@@ -2211,14 +2831,31 @@ def command_list_templates(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
         raise WorkflowError(
-            f"No story templates in category {category!r}. "
-            f"Allowed: {', '.join(categories)}"
+            f"No ready story templates for category={category or '*'} "
+            f"intent={intent or '*'}. Categories: {', '.join(categories)}"
+        )
+    if intent and not templates:
+        next_action = (
+            f"No rights-cleared ready-made {intent} templates are installed. "
+            "Continue with the custom interview and write an original story."
+        )
+    else:
+        next_action = (
+            "Pick a templateId, then run apply-template on an initialized client project."
         )
     return {
         "catalogVersion": catalog.get("catalogVersion"),
         "count": len(templates),
+        "intent": intent or None,
+        "draftsHidden": sum(
+            1
+            for template in catalog["templates"].values()
+            if template.get("qualityStatus") != "ready"
+        )
+        if not include_drafts
+        else 0,
         "templates": templates,
-        "nextAction": "Pick a templateId, then run apply-template on an initialized client project.",
+        "nextAction": next_action,
     }
 
 
@@ -2301,6 +2938,7 @@ def build_story_from_template(
     selection = {
         "templateId": template["templateId"],
         "titleAr": resolve_template_text(template["titleAr"], hero_name),
+        "storyIntent": template["storyIntent"],
         "catalogVersion": int(catalog.get("catalogVersion") or 1),
         "appliedAt": applied_at,
         "customizationNote": note,
@@ -2331,6 +2969,9 @@ def build_story_from_template(
                 "setting": resolve_template_text(source_page["setting"], hero_name),
                 "action": resolve_template_text(source_page["action"], hero_name),
             }
+        because = source_page.get("because")
+        if isinstance(because, str) and because.strip():
+            page["because"] = resolve_template_text(because, hero_name)
         transition = source_page.get("transitionFromPrevious")
         if isinstance(transition, str) and transition.strip():
             page["transitionFromPrevious"] = resolve_template_text(
@@ -2351,6 +2992,13 @@ def build_story_from_template(
     theme = get_theme(str(theme_id))
     visual_style = brief.get("visualStyle") or theme["visualStyle"]
     page_count = int(template["pageCount"])
+    requested_goal = brief.get("storyGoal")
+    story_goal = (
+        copy.deepcopy(requested_goal)
+        if isinstance(requested_goal, dict)
+        and requested_goal.get("mode") == template.get("storyIntent")
+        else story_goal_from_template(template, hero_name)
+    )
     story = {
         "title": selection["titleAr"],
         "targetAge": target_age,
@@ -2359,6 +3007,11 @@ def build_story_from_template(
         "themeId": theme_id,
         "visualStyle": visual_style,
         "purpose": template["purpose"],
+        "storyGoal": story_goal,
+        "storyType": str(
+            template.get("storyType")
+            or ("C" if template["storyIntent"] == "entertainment" else "A")
+        ),
         "pageCount": page_count,
         "outline": resolve_template_text(template["summaryAr"], hero_name),
         "templateSelection": copy.deepcopy(selection),
@@ -2372,6 +3025,27 @@ def build_story_from_template(
         ),
         "pages": pages,
     }
+    if template["storyIntent"] == "educational":
+        # The moral spine travels with the story so review-story, the reviewers,
+        # and any later edit can see what this book is supposed to prove.
+        story.update(
+            {
+                "moral": copy.deepcopy(template["moral"]),
+                "premise": resolve_template_text(template["premise"], hero_name),
+                "temptation": resolve_template_text(template["temptation"], hero_name),
+                "cost": resolve_template_text(template["cost"], hero_name),
+                "endingProof": resolve_template_text(
+                    template["endingProof"], hero_name
+                ),
+            }
+        )
+    else:
+        story["entertainment"] = {
+            field: resolve_template_text(
+                str((template.get("entertainment") or {})[field]), hero_name
+            )
+            for field in ENTERTAINMENT_FIELDS
+        }
     story["continuity"]["avoid"] = merge_unique_strings(
         story["continuity"].get("avoid"),
         brief.get("avoid"),
@@ -2387,6 +3061,23 @@ def build_story_from_template(
         selection["requiresRevision"] = True
         story["templateSelection"] = copy.deepcopy(selection)
         story["customizationNote"] = note
+    # The catalog predates handoff §7. Reshape every applied template into the
+    # 22+2 structure instead of quietly shipping a shorter book: the fixed pages
+    # come from the doctrine, and any missing story page becomes a declared hole
+    # a human must write.
+    story, structure_report = doctrine.expand_to_handoff_structure(
+        story, hero_name=hero_name
+    )
+    selection["structureId"] = structure_report["structureId"]
+    selection["gapPages"] = structure_report["gapPages"]
+    selection["requiresStructureExpansion"] = structure_report[
+        "requiresStructureExpansion"
+    ]
+    if structure_report["requiresStructureExpansion"]:
+        selection["requiresRevision"] = True
+    selection["structuredAt"] = None
+    story["templateSelection"] = copy.deepcopy(selection)
+    story["structureReport"] = structure_report
     missing_outfits = [
         persona["displayName"] for persona in personas if not persona.get("fixedOutfit")
     ]
@@ -2397,6 +3088,12 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
     catalog, template = get_story_template(str(args.template).strip())
+    if template.get("qualityStatus") != "ready":
+        issues = "; ".join(template.get("qualityIssuesAr") or [])
+        raise WorkflowError(
+            f"Template {template['templateId']} is blocked for revision and is "
+            f"not customer-selectable: {issues}"
+        )
     note = normalize_template_note(getattr(args, "note", None))
     story_path = input_dir(project) / "story.json"
 
@@ -2421,6 +3118,18 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
     if not brief_path.is_file():
         raise WorkflowError(f"Missing brief.json — run init first: {brief_path}")
     brief = read_json(brief_path)
+    existing_goal = brief.get("storyGoal")
+    if not isinstance(existing_goal, dict) or not existing_goal.get("mode"):
+        raise WorkflowError(
+            "Choose educational or entertainment with set-story-goal before "
+            "applying a template."
+        )
+    if existing_goal.get("mode") != template.get("storyIntent"):
+        raise WorkflowError(
+            f"Book goal is {existing_goal.get('mode')}, but template "
+            f"{template['templateId']} is {template.get('storyIntent')}. "
+            "Choose a matching template."
+        )
     base_must_show = brief.get("mustShow") or []
     base_avoid = brief.get("avoid") or []
     previous_selection = brief.get("templateSelection")
@@ -2442,14 +3151,22 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
         note=note,
     )
     source_quality = review_story_quality(story)
-    if source_quality["errors"]:
-        messages = [issue["message"] for issue in source_quality["errors"][:6]]
+    # A catalog template written before handoff §7 is two story pages short, so
+    # `expand_to_handoff_structure` opened them as declared holes. Those holes
+    # are the expected state right after apply; every other error still blocks.
+    contract_errors = [
+        issue
+        for issue in source_quality["errors"]
+        if issue.get("code") != "unwritten-story-page"
+    ]
+    if contract_errors:
+        messages = [issue["message"] for issue in contract_errors[:6]]
         raise WorkflowError(
             f"Story template {template['templateId']} failed its built-in quality "
             "contract: " + "; ".join(messages)
         )
 
-    page_count = int(template["pageCount"])
+    page_count = int(story["pageCount"])
     previous_page_count = integer_value(
         (book.get("settings") or {}).get("pdfPageCount") or DEFAULT_PDF_PAGES,
         "book.settings.pdfPageCount",
@@ -2478,6 +3195,7 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
     brief["languageProfileId"] = story["languageProfileId"]
     brief["title"] = story["title"]
     brief["purpose"] = template["purpose"]
+    brief["storyGoal"] = copy.deepcopy(story["storyGoal"])
     brief["outline"] = story["outline"]
     note = selection.get("customizationNote")
     brief["templateSelection"] = copy.deepcopy(selection)
@@ -2505,6 +3223,7 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
             current["role"] = persona["role"]
     book["storyPath"] = None
     book["templateSelection"] = copy.deepcopy(selection)
+    book["storyGoal"] = copy.deepcopy(story["storyGoal"])
     book["status"] = "story_template_selected"
     book["nextAsset"] = None
     book["nextAction"] = template_next_action(book, brief)
@@ -2518,6 +3237,11 @@ def command_apply_template(args: argparse.Namespace) -> dict[str, Any]:
         "sourceLanguageProfileId": selection.get("sourceLanguageProfileId"),
         "targetLanguageProfileId": selection.get("targetLanguageProfileId"),
         "requiresAgeAdaptation": bool(selection.get("requiresAgeAdaptation")),
+        "requiresStructureExpansion": bool(
+            selection.get("requiresStructureExpansion")
+        ),
+        "structureReport": story.get("structureReport"),
+        "templateSelection": copy.deepcopy(selection),
         "storyQuality": source_quality,
         "missingFixedOutfits": missing_outfits,
         "readyToLock": not missing_outfits and not selection.get("requiresRevision"),
@@ -2596,6 +3320,10 @@ def command_complete_template_customization(args: argparse.Namespace) -> dict[st
     if selection.get("requiresAgeAdaptation"):
         selection["requiresAgeAdaptation"] = False
         selection["ageAdaptedAt"] = now_iso()
+    if selection.get("requiresStructureExpansion"):
+        # review_story_quality already refused while any gap page was empty.
+        selection["requiresStructureExpansion"] = False
+        selection["structuredAt"] = now_iso()
     selection["requiresRevision"] = False
     selection["customizedAt"] = now_iso()
     story["templateSelection"] = copy.deepcopy(selection)
@@ -2992,6 +3720,17 @@ def command_set_personalization(args: argparse.Namespace) -> dict[str, Any]:
         if getattr(args, "replace", False)
         else merge_personalization(brief.get("personalization"), incoming)
     )
+    focus = personalization.get("habitFocus")
+    goal = brief.get("storyGoal")
+    if focus and isinstance(goal, dict) and goal.get("mode") == "entertainment":
+        raise WorkflowError(
+            "This book is in entertainment mode. Change it to educational before "
+            "adding a habitFocus; a hidden behaviour lesson breaks the family promise."
+        )
+    if focus and not isinstance(goal, dict):
+        goal = normalize_story_goal("educational", str(focus["targetBehaviorAr"]))
+        brief["storyGoal"] = copy.deepcopy(goal)
+        book["storyGoal"] = copy.deepcopy(goal)
     sync_personalization_into_brief(brief, personalization)
 
     story_path = input_dir(project) / "story.json"
@@ -3000,6 +3739,8 @@ def command_set_personalization(args: argparse.Namespace) -> dict[str, Any]:
         story = validated_story if validated_story is not None else read_json(story_path)
         if not isinstance(story, dict):
             raise WorkflowError("Story root must be an object")
+        if isinstance(goal, dict):
+            story["storyGoal"] = copy.deepcopy(goal)
         sync_personalization_into_story(story, personalization)
         selection = canonical_selection
         if selection is not None:
@@ -3164,6 +3905,28 @@ def validate_personalization_coverage(
                 f"habitArc covers {len(used)} pages; give it at least "
                 f"{MIN_HABIT_ARC_PAGES} so the change is earned, not announced."
             )
+        # Page ids alone are not proof. The replacement behaviour must be
+        # explicitly drawable on the decision page and shown holding again.
+        by_id = {str(page["id"]): page for page in pages}
+        target = str(focus["targetBehaviorAr"]).strip()
+        for stage in ("turn", "reinforce"):
+            visible = False
+            for page_id in resolved[stage]:
+                page = by_id[page_id]
+                evidence = " ".join(
+                    str(page.get(field) or "")
+                    for field in ("text", "beat", "action")
+                )
+                if _arabic_contains(evidence, target):
+                    visible = True
+                    break
+            if not visible:
+                raise WorkflowError(
+                    f"habitArc.{stage} names pages but none explicitly shows the "
+                    f"replacement behaviour {target!r}. Put the exact behaviour "
+                    "in page.text, page.beat, or page.action so it can be drawn "
+                    "and reviewed."
+                )
         arc_out = resolved
 
     coverage = block.get("requestCoverage")
@@ -3223,6 +3986,42 @@ def validate_personalization_coverage(
                 )
         covered.append(request_id)
     return {"habitArc": arc_out, "coveredRequests": covered}
+
+
+def doctrine_fixed_page_ids(
+    payload: dict[str, Any],
+    pages: list[dict[str, Any]],
+    *,
+    include_back_cover: bool = False,
+) -> set[str]:
+    """Ids of pages whose copy comes from the doctrine, not from the author.
+
+    The back cover is fixed copy too, but unlike the dedication it still carries
+    the story's `resolution` arc stage — so language checks exclude it while the
+    causal spine keeps it. Callers say which they mean.
+
+    Returns an empty set for a story that is not on the `hekayati-22` structure,
+    so an imported legacy story keeps behaving exactly as it did before.
+    """
+    if str(payload.get("bookStructure") or BOOK_STRUCTURE_ID) != BOOK_STRUCTURE_ID:
+        return set()
+    try:
+        roles = doctrine.structure_slot_roles(len(pages))
+    except doctrine.DoctrineError:
+        return set()
+    wanted = {"dedication", "other-stories"}
+    if include_back_cover:
+        wanted.add("back-cover")
+    return {page_id for page_id, role in roles.items() if role in wanted}
+
+
+def declared_gap_page_ids(pages: list[dict[str, Any]]) -> set[str]:
+    """Story slots opened by structure expansion that nobody has written yet."""
+    return {
+        str(page.get("id") or "")
+        for page in pages
+        if isinstance(page, dict) and page.get(doctrine.GAP_PAGE_MARKER)
+    }
 
 
 def validate_story_locations(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3438,10 +4237,20 @@ def _story_term_count(text: str, term: str) -> int:
 def _language_entries(
     catalog: dict[str, Any], profile: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    """Age-profile replacements plus the handoff §6 dialect fixes.
+
+    Both lists have the same shape, so the register check does not care which
+    file a term came from — but the doctrine terms cannot be edited out of the
+    age catalog by accident, which is the point.
+    """
     entries: list[dict[str, Any]] = []
     shared = catalog.get("sharedEgyptian") or {}
     lexicon = profile.get("lexicon") or {}
-    for group in (shared.get("registerReplacements"), lexicon.get("avoidOrReplace")):
+    for group in (
+        shared.get("registerReplacements"),
+        lexicon.get("avoidOrReplace"),
+        doctrine.register_replacements(),
+    ):
         if not isinstance(group, list):
             continue
         for entry in group:
@@ -3597,7 +4406,10 @@ def validate_narrative_arc(
         if isinstance(page, dict) and page.get("id") is not None
     }
     cover_id = str(pages[0].get("id")) if pages else "cover"
-    story_page_ids = set(page_order) - {cover_id}
+    # The dedication and «قصص تانية» pages carry doctrine-owned copy, not story
+    # beats, so they sit outside the causal spine by design.
+    off_spine_ids = doctrine_fixed_page_ids(payload, pages) | declared_gap_page_ids(pages)
+    story_page_ids = set(page_order) - {cover_id} - off_spine_ids
     covered: set[str] = set()
     stage_ranges: list[tuple[str, int, int]] = []
     page_owners: dict[str, list[str]] = {}
@@ -3903,7 +4715,17 @@ def validate_narrative_arc(
     # Any new place or full cast replacement needs a meaningful causal/time
     # bridge. Keeping the hero in frame does not make a home-to-moon teleport
     # coherent by itself.
-    for previous, current in zip(pages, pages[1:]):
+    # The back cover keeps its `resolution` stage but carries doctrine-owned
+    # marketing copy, so it can never contain a movement bridge — asking it for
+    # one would be an unfixable error. Drop every fixed page from the bridge
+    # sequence while leaving arc coverage alone.
+    bridge_excluded = off_spine_ids | doctrine_fixed_page_ids(
+        payload, pages, include_back_cover=True
+    )
+    spine_pages = [
+        page for page in pages if str(page.get("id") or "") not in bridge_excluded
+    ]
+    for previous, current in zip(spine_pages, spine_pages[1:]):
         if previous.get("id") == cover_id:
             continue
         previous_visible = {
@@ -3963,6 +4785,154 @@ def validate_narrative_arc(
     return errors, warnings
 
 
+def _story_goal_errors(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Keep the book's job explicit; never hide a lesson inside a fun route."""
+    goal = payload.get("storyGoal")
+    if not isinstance(goal, dict):
+        return [
+            {
+                "code": "missing-story-goal",
+                "message": (
+                    "story.storyGoal is missing. Choose educational or "
+                    "entertainment before writing the plot."
+                ),
+            }
+        ]
+    mode = goal.get("mode")
+    if mode not in STORY_INTENTS:
+        return [
+            {
+                "code": "invalid-story-goal",
+                "message": (
+                    "story.storyGoal.mode must be educational or entertainment"
+                ),
+            }
+        ]
+    goal_ar = goal.get("goalAr")
+    errors: list[dict[str, Any]] = []
+    if not isinstance(goal_ar, str) or len(goal_ar.strip()) < MIN_STORY_GOAL_CHARS:
+        errors.append(
+            {
+                "code": "thin-story-goal",
+                "message": (
+                    f"story.storyGoal.goalAr needs {MIN_STORY_GOAL_CHARS}+ chars "
+                    "that say what this book is meant to do"
+                ),
+            }
+        )
+    focus = ((payload.get("personalization") or {}).get("habitFocus"))
+    if mode == "entertainment" and focus:
+        errors.append(
+            {
+                "code": "hidden-lesson-in-entertainment",
+                "message": (
+                    "Entertainment mode cannot carry habitFocus. Change the goal "
+                    "to educational or remove the habit arc; do not disguise a "
+                    "behaviour lesson as pure fun."
+                ),
+            }
+        )
+    return errors
+
+
+def _story_moral_errors(
+    payload: dict[str, Any], pages: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Moral-integrity review for a story built from a ready-made template.
+
+    Custom stories are exempt — a family writing their own plot is not required
+    to declare a value. Template-derived stories are: the spine is what makes
+    the book mean something, and it is the first thing lost when pages get
+    rewritten by hand after `apply-template`.
+    """
+    selection = payload.get("templateSelection")
+    if not isinstance(selection, dict):
+        return []
+    if selection.get("storyIntent") != "educational":
+        return []
+    errors: list[dict[str, Any]] = []
+    moral = payload.get("moral")
+    if not isinstance(moral, dict) or not moral.get("valueId"):
+        errors.append(
+            {
+                "code": "missing-moral",
+                "message": (
+                    "story.json came from a template but lost its moral block. "
+                    "Reapply the template — the value is what the book is for."
+                ),
+            }
+        )
+    else:
+        known = load_morals_catalog()["values"]
+        if moral.get("valueId") not in known:
+            errors.append(
+                {
+                    "code": "unknown-moral-value",
+                    "message": (
+                        f"moral.valueId {moral.get('valueId')!r} is not in the "
+                        "morals catalog"
+                    ),
+                }
+            )
+    for field in MORAL_FIELDS:
+        value = payload.get(field)
+        if not isinstance(value, str) or len(value.strip()) < MIN_MORAL_FIELD_CHARS:
+            errors.append(
+                {
+                    "code": "thin-moral-spine",
+                    "message": (
+                        f"story.{field} is missing or too thin — without it the "
+                        "story has no temptation, cost, or proof"
+                    ),
+                }
+            )
+
+    interior = [page for page in pages if page.get("id") not in {"cover", "back-cover"}]
+    for page in interior:
+        hits = preachy_hits(page.get("text"))
+        if hits:
+            errors.append(
+                {
+                    "code": "preachy-page",
+                    "pageId": page.get("id"),
+                    "message": (
+                        f"{page.get('id')} announces the lesson instead of "
+                        f"showing it ({', '.join(hits)}). Let the consequence "
+                        "carry it; a closing line belongs on the back cover."
+                    ),
+                }
+            )
+    return errors
+
+
+def _story_entertainment_errors(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    selection = payload.get("templateSelection")
+    if not isinstance(selection, dict) or selection.get("storyIntent") != "entertainment":
+        return []
+    block = payload.get("entertainment")
+    if not isinstance(block, dict):
+        return [
+            {
+                "code": "missing-entertainment-spine",
+                "message": (
+                    "Entertainment template lost its fantasy/stakes/hero/payoff "
+                    "spine. Reapply the template."
+                ),
+            }
+        ]
+    return [
+        {
+            "code": "thin-entertainment-spine",
+            "message": f"story.entertainment.{field} is missing or too thin",
+        }
+        for field in ENTERTAINMENT_FIELDS
+        if not isinstance(block.get(field), str)
+        or len(block[field].strip()) < MIN_STORY_GOAL_CHARS
+    ]
+
+
 def review_story_quality(
     payload: dict[str, Any], pages: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
@@ -3999,6 +4969,9 @@ def review_story_quality(
             }
         )
     errors.extend(_story_cast_errors(payload, pages))
+    errors.extend(_story_goal_errors(payload))
+    errors.extend(_story_moral_errors(payload, pages))
+    errors.extend(_story_entertainment_errors(payload))
 
     declared_profile = payload.get("languageProfileId")
     if declared_profile and declared_profile != profile["id"]:
@@ -4045,9 +5018,27 @@ def review_story_quality(
     interior_page_count = 0
     suddenly_pages: list[str] = []
 
+    fixed_page_ids = doctrine_fixed_page_ids(
+        payload, pages, include_back_cover=True
+    ) | declared_gap_page_ids(pages)
     for page in pages:
         page_id = str(page.get("id") or "unknown")
         raw_text = str(page.get("text") or "")
+        if page_id in fixed_page_ids:
+            # Fixed pages hold verbatim doctrine copy. Measuring them against an
+            # age word budget or the Egyptian register list would flag Omar's own
+            # approved wording; `doctrine.fixed_page_errors` guards them instead.
+            page_stats.append(
+                {
+                    "pageId": page_id,
+                    "words": _arabic_word_count(raw_text),
+                    "sentences": _sentence_count(raw_text),
+                    "sentenceWords": [],
+                    "fixedByDoctrine": True,
+                }
+            )
+            total_words += _arabic_word_count(raw_text)
+            continue
         protected_phrases, protected_errors = _validated_protected_phrases(
             page, catalog
         )
@@ -4245,6 +5236,11 @@ def review_story_quality(
     )
     errors.extend(arc_errors)
     warnings.extend(arc_warnings)
+    # handoff.md is the source of truth, so its verdict lands in the same report
+    # the agent already reads instead of a separate command it might skip.
+    errors.extend(doctrine.doctrine_errors(payload, pages))
+    errors.extend(doctrine.gap_page_errors(pages))
+    warnings.extend(doctrine.doctrine_warnings(payload, pages))
     return {
         "decision": "pass" if not errors else "revise",
         "targetAge": int(payload.get("targetAge")),
@@ -4358,7 +5354,7 @@ def validate_story_payload(
                 raise WorkflowError(f"{page.get('id', 'unknown')} missing {key}")
         text = page["text"]
         if not isinstance(text, str) or not text.strip():
-            raise WorkflowError(f"{page['id']} must have non-empty in-image Arabic text")
+            raise WorkflowError(f"{page['id']} must have non-empty Arabic caption text")
         for field in ("participants", "guests"):
             values = page[field]
             if (
@@ -4389,6 +5385,312 @@ def validate_story_payload(
     return pages
 
 
+def validate_story_review_candidate(
+    project: Path,
+    book: dict[str, Any],
+    payload: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
+    """Run every text/story gate before exposing a draft to the user."""
+    expected_ids = pdf_ids(book)
+    brief_path = input_dir(project) / "brief.json"
+    brief = read_json(brief_path) if brief_path.is_file() else {}
+    brief_goal = brief.get("storyGoal")
+    story_goal = payload.get("storyGoal")
+    if not isinstance(brief_goal, dict):
+        raise WorkflowError(
+            "Choose educational or entertainment with set-story-goal before story review."
+        )
+    if not isinstance(story_goal, dict):
+        raise WorkflowError("Copy brief.storyGoal into story.storyGoal before story review")
+    for field in ("mode", "goalAr"):
+        if story_goal.get(field) != brief_goal.get(field):
+            raise WorkflowError(
+                f"Story goal drift: story.storyGoal.{field} must match "
+                f"brief.storyGoal.{field}"
+            )
+
+    selection = validate_template_selection_integrity(payload, book, brief)
+    if selection is not None:
+        validate_template_language_target(payload, selection, book, brief)
+        gates: list[str] = []
+        if selection.get("requiresRevision"):
+            gates.append(
+                "revise the customization note and run complete-template-customization"
+            )
+        missing_outfits = [
+            str(persona.get("displayName") or persona.get("id") or "unknown")
+            for persona in payload.get("personas") or []
+            if isinstance(persona, dict) and not persona.get("fixedOutfit")
+        ]
+        if missing_outfits:
+            gates.append(f"set fixed outfits for {', '.join(missing_outfits)}")
+        if gates:
+            raise WorkflowError("Story is not ready for user review: " + "; ".join(gates))
+
+    pages = validate_story_payload(payload, expected_ids)
+    cast_errors = _story_cast_errors(payload, pages)
+    if cast_errors:
+        raise WorkflowError(
+            "Story cast validation failed: "
+            + "; ".join(issue["message"] for issue in cast_errors[:8])
+        )
+    validate_story_persona_sources(payload, book)
+    validate_personalization_coverage(payload, pages)
+    selected_profile = get_story_language_profile(payload.get("targetAge"))
+    payload["languageProfileId"] = selected_profile["id"]
+    quality_report = review_story_quality(payload, pages)
+    blocking = list(quality_report["errors"])
+    if (
+        selection is not None
+        and selection.get("sourceLanguageProfileId")
+        != selection.get("targetLanguageProfileId")
+    ):
+        blocking.extend(strict_template_age_issues(quality_report))
+    if blocking:
+        messages = [issue["message"] for issue in blocking[:8]]
+        remaining = len(blocking) - len(messages)
+        suffix = f"; plus {remaining} more" if remaining > 0 else ""
+        raise WorkflowError(
+            "Story quality check failed before user review: "
+            + "; ".join(messages)
+            + suffix
+            + ". Run review-story for the full report."
+        )
+    return pages, quality_report, selection
+
+
+def command_prepare_story_review(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    if book.get("storyPath"):
+        raise WorkflowError(
+            "Story is already locked. Do not overwrite the approved review file or "
+            "reuse existing prompts/images for a changed story."
+        )
+    source = input_dir(project) / "story.json"
+    payload = read_json(source)
+    pages, quality_report, _selection = validate_story_review_candidate(
+        project, book, payload
+    )
+    # Persist the normalized profile selected by the validator before hashing.
+    atomic_json(source, payload)
+
+    destination = story_review_path(project, book)
+    force = bool(getattr(args, "force", False))
+    if destination.exists() and not force:
+        existing = story_review_status(project, book)
+        if existing.get("status") in {
+            "awaiting_user",
+            "changes_detected",
+            "approved",
+        }:
+            return {
+                "created": False,
+                "review": str(destination),
+                "storyReview": existing,
+                "nextAction": existing["nextAction"],
+            }
+        raise WorkflowError(
+            f"Review file already exists and may contain user edits: {destination}. "
+            "Inspect it first; use --force only when replacing it is intentional."
+        )
+
+    previous = book.get("storyReview")
+    revision = int(previous.get("revision") or 0) + 1 if isinstance(previous, dict) else 1
+    prepared_at = now_iso()
+    story_hash = sha256(source)
+    markdown = render_story_review(
+        payload,
+        story_sha256=story_hash,
+        revision=revision,
+        prepared_at=prepared_at,
+    )
+    atomic_text(destination, markdown)
+    review_hash = normalized_markdown_sha256(markdown)
+    book["storyReview"] = {
+        "status": "awaiting_user",
+        "path": str(destination.relative_to(project)),
+        "revision": revision,
+        "preparedAt": prepared_at,
+        "preparedStorySha256": story_hash,
+        "preparedReviewSha256": review_hash,
+        "approvedAt": None,
+        "approvalStatement": None,
+        "approvedStorySha256": None,
+        "approvedReviewSha256": None,
+    }
+    book["storyQuality"] = quality_report
+    book["status"] = "story_review"
+    book["nextAction"] = (
+        f"Open {destination} in Obsidian. Review all {len(pages)} pages, edit the "
+        "story text and scene descriptions, then tell the agent when finished."
+    )
+    save_book(project, book)
+    return {
+        "created": True,
+        "review": str(destination),
+        "pageCount": len(pages),
+        "storyReview": story_review_status(project, book),
+        "nextAction": book["nextAction"],
+    }
+
+
+def command_story_review_status(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    return {
+        "project": str(project),
+        "storyReview": story_review_status(project, book),
+    }
+
+
+def command_approve_story_review(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    if book.get("storyPath"):
+        raise WorkflowError(
+            "Cannot re-approve story-review.md after lock-story. Existing prompts or "
+            "images must never be reused for changed story text."
+        )
+    statement = str(args.statement or "").strip()
+    if len(statement) < 3:
+        raise WorkflowError("Approval statement is too short")
+    state = book.get("storyReview")
+    if not isinstance(state, dict) or not state.get("preparedStorySha256"):
+        raise WorkflowError("Run prepare-story-review before approval")
+    source = input_dir(project) / "story.json"
+    if not source.is_file():
+        raise WorkflowError(f"Missing story file: {source}")
+    story_bytes = source.read_bytes()
+    captured_story_hash = hashlib.sha256(story_bytes).hexdigest()
+    if captured_story_hash != state.get("preparedStorySha256"):
+        raise WorkflowError(
+            "story.json changed after the review file was prepared. Prepare a fresh "
+            "review so the user sees the current story."
+        )
+    review_path = story_review_path(project, book)
+    if not review_path.is_file():
+        raise WorkflowError(f"Missing story review file: {review_path}")
+    try:
+        payload = json.loads(story_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkflowError(f"Invalid JSON in captured story snapshot: {source}") from exc
+    if not isinstance(payload, dict):
+        raise WorkflowError("Captured story snapshot must be a JSON object")
+    expected_ids = [
+        page.get("id") for page in payload.get("pages") or [] if isinstance(page, dict)
+    ]
+    try:
+        review_text = review_path.read_text(encoding="utf-8")
+        edits = parse_story_review(
+            review_text, expected_ids=expected_ids
+        )
+        revised = apply_story_review(payload, edits)
+    except (TypeError, ValueError) as exc:
+        raise WorkflowError(f"Invalid story-review.md: {exc}") from exc
+    pages, quality_report, _selection = validate_story_review_candidate(
+        project, book, revised
+    )
+    atomic_json(source, revised)
+    approved_story_hash = sha256(source)
+    approved_review_hash = normalized_markdown_sha256(review_text)
+    state.update(
+        {
+            "status": "approved",
+            "approvedAt": now_iso(),
+            "approvalStatement": statement,
+            "approvedStorySha256": approved_story_hash,
+            "approvedReviewSha256": approved_review_hash,
+        }
+    )
+    book["storyReview"] = state
+    book["storyQuality"] = quality_report
+    book["status"] = "story_review_approved"
+    book["nextAction"] = (
+        "User-approved review synced to story.json. Run lock-story; then write all "
+        "prompts."
+    )
+    save_book(project, book)
+    return {
+        "decision": "approved",
+        "review": str(review_path),
+        "story": str(source),
+        "pageCount": len(pages),
+        "storySha256": approved_story_hash,
+        "storyReview": story_review_status(project, book),
+        "nextAction": book["nextAction"],
+    }
+
+
+def command_reopen_story_review(args: argparse.Namespace) -> dict[str, Any]:
+    """Safely reopen a locked story and invalidate every dependent artifact."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    statement = str(args.statement or "").strip()
+    if len(statement) < 3:
+        raise WorkflowError("Story-revision statement is too short")
+    if not book.get("storyPath"):
+        raise WorkflowError("Story is not locked; use prepare-story-review directly")
+    source = input_dir(project) / "story.json"
+    if not source.is_file():
+        raise WorkflowError(f"Missing locked story: {source}")
+
+    history = book.setdefault("storyRevisionHistory", [])
+    if not isinstance(history, list):
+        raise WorkflowError("storyRevisionHistory must be a list")
+    history.append(
+        {
+            "reopenedAt": now_iso(),
+            "statement": statement,
+            "storySha256": sha256(source),
+            "storyReview": copy.deepcopy(book.get("storyReview")),
+            "review": copy.deepcopy(book.get("review")),
+            "pdf": copy.deepcopy(book.get("pdf")),
+            "activeImages": {
+                str(asset.get("id")): asset.get("imagePath")
+                for asset in book.get("assets") or []
+                if isinstance(asset, dict) and asset.get("imagePath")
+            },
+        }
+    )
+    for asset in book.get("assets") or []:
+        if not isinstance(asset, dict) or not asset.get("id"):
+            continue
+        version = int(asset.get("promptVersion") or 1) + 1
+        asset["promptVersion"] = version
+        asset["promptPath"] = f"input/prompts/{asset['id']}.v{version:02d}.json"
+        asset["status"] = "planned"
+        asset["attempt"] = 0
+        asset["imagePath"] = None
+        asset["storySha256"] = None
+        asset["startedAt"] = None
+        asset["completedAt"] = None
+        asset["durationSec"] = None
+        if asset.get("includeInPdf"):
+            asset["storyText"] = None
+    previous_review = book.get("storyReview") or {}
+    book["storyPath"] = None
+    book["locationAssets"] = {}
+    book["storyReview"] = {
+        "status": "not_prepared",
+        "path": STORY_REVIEW_RELATIVE_PATH,
+        "revision": int(previous_review.get("revision") or 0),
+        "supersededAt": now_iso(),
+        "reopenStatement": statement,
+    }
+    invalidate_pdf_and_reviews(book)
+    book["status"] = "story_revision"
+    book["nextAsset"] = None
+    book["nextAction"] = "Prepare a fresh Markdown story review revision."
+    save_book(project, book)
+    result = command_prepare_story_review(
+        argparse.Namespace(project=project, force=True)
+    )
+    result["reopened"] = True
+    result["statement"] = statement
+    return result
+
+
 def command_lock_story(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
@@ -4399,8 +5701,25 @@ def command_lock_story(args: argparse.Namespace) -> dict[str, Any]:
         else input_dir(project) / "story.json"
     )
     payload = read_json(source)
+    require_story_review_approved(project, book, source=source)
     brief_path = input_dir(project) / "brief.json"
     brief = read_json(brief_path) if brief_path.is_file() else None
+    if isinstance(brief, dict) and "storyGoal" in brief:
+        brief_goal = brief.get("storyGoal")
+        story_goal = payload.get("storyGoal")
+        if not isinstance(brief_goal, dict):
+            raise WorkflowError(
+                "Choose educational or entertainment with set-story-goal before "
+                "lock-story."
+            )
+        if not isinstance(story_goal, dict):
+            raise WorkflowError("Copy brief.storyGoal into story.storyGoal before lock")
+        for field in ("mode", "goalAr"):
+            if story_goal.get(field) != brief_goal.get(field):
+                raise WorkflowError(
+                    f"Story goal drift: story.storyGoal.{field} must match "
+                    f"brief.storyGoal.{field}"
+                )
     selection = validate_template_selection_integrity(payload, book, brief)
     if selection is not None:
         validate_template_language_target(payload, selection, book, brief)
@@ -4428,8 +5747,15 @@ def command_lock_story(args: argparse.Namespace) -> dict[str, Any]:
     # If story page count differs and story not conflicting with images, sync settings
     pages_raw = payload.get("pages")
     if selection is not None and isinstance(pages_raw, list):
-        _, selected_template = get_story_template(str(selection["templateId"]))
-        if len(pages_raw) != int(selected_template["pageCount"]):
+        # Applying a template reshapes it into the handoff structure, so the
+        # locked book matches the doctrine page count — not the catalog's older
+        # `pageCount`, which only describes the source material.
+        expected_template_pages = (
+            DEFAULT_PDF_PAGES
+            if str(selection.get("structureId") or BOOK_STRUCTURE_ID) == BOOK_STRUCTURE_ID
+            else int(get_story_template(str(selection["templateId"]))[1]["pageCount"])
+        )
+        if len(pages_raw) != expected_template_pages:
             raise WorkflowError(
                 "Template story page count drifted from its catalog source; "
                 "reapply the template before lock-story"
@@ -4504,6 +5830,7 @@ def command_lock_story(args: argparse.Namespace) -> dict[str, Any]:
         *[asset_by_id(book, asset_id) for asset_id in expected_ids],
     ]
     book["storyPath"] = "input/story.json"
+    book["storyGoal"] = copy.deepcopy(payload.get("storyGoal"))
     book["settings"]["languageProfileId"] = quality_report["languageProfileId"]
     book["storyQuality"] = quality_report
     book["status"] = "writing_prompts"
@@ -4708,7 +6035,6 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
         if isinstance(payload.get("composition"), dict)
         else {}
     )
-    text_block = payload.get("text") if isinstance(payload.get("text"), dict) else {}
     locks = payload.get("identityLocks") if isinstance(payload.get("identityLocks"), dict) else {}
     outfits = payload.get("fixedOutfits") if isinstance(payload.get("fixedOutfits"), dict) else {}
     actions = (
@@ -4835,60 +6161,42 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
     if style_line:
         add(0, "Style: " + style_line)
 
-    # 7. Composition.
+    # 7. Composition. Lens and depth of field sit here rather than in the style
+    # block because they change per page: they are what stops 22 illustrations
+    # reading as one camera bolted to a tripod for the whole book.
     comp_bits = [
         _clean(composition.get("shotScale")),
         _clean(composition.get("viewpoint")),
         _clean(composition.get("focalHierarchy")),
+        _clean(composition.get("lens")),
+        _clean(composition.get("depthOfField")),
     ]
     comp = "; ".join(b for b in comp_bits if b)
     if comp:
         add(3, f"Composition: {comp}.")
 
-    # 8. Arabic text. Sheets carry none.
-    verbatim = payload.get("verbatimArabicOverride") or (
-        text_block.get("verbatimArabic") if isinstance(text_block, dict) else ""
-    )
-    if not (is_character_sheet or is_location_sheet) and isinstance(verbatim, str) and verbatim.strip():
-        integration = (
-            composition.get("textIntegration")
-            if isinstance(composition.get("textIntegration"), dict)
-            else {}
-        )
-        placement = _clean(integration.get("placement")) or "a quiet zone"
-        surface = _clean(integration.get("surface"))
-        add(
-            0,
-            f'Render this Arabic text exactly once inside the artwork, right-to-left, '
-            f'correctly connected and fully legible: "{verbatim.strip()}". '
-            f"Place it along the {placement} of the frame"
-            + (f", on {surface}" if surface else "")
-            + ". Blend the lettering into the art sharing the scene palette, "
-            "lighting and texture. No hard white box, no sticker label, no speech "
-            "bubble, no Latin text. Keep it clear of faces and hands.",
-        )
-        # Models happily invent Arabic on posters, signs and book covers, and it
-        # comes out unrelated or malformed. Everything writable stays blank
-        # unless the author explicitly allowed a string.
-        extras = _clean_list(payload.get("inImageTextExtras"), 4)
-        if extras:
-            add(
-                0,
-                "The only other writing allowed anywhere in the image: "
-                + "; ".join(f'"{e}"' for e in extras)
-                + ". Every other sign, poster, book cover, board and label must "
-                "carry no writing at all — wordless drawings only.",
-            )
-        else:
-            add(
-                0,
-                "This caption is the ONLY text anywhere in the image. Every sign, "
-                "poster, book cover, noticeboard, banner and label must be blank "
-                "or show wordless drawings — never invented words or letters.",
-            )
+    # 8. Text. Nothing readable belongs in any generated image.
+    # The story text is NOT painted into the art. It is drawn afterwards as a
+    # real PDF text layer, so the illustration must arrive text-free with the
+    # caption band kept visually quiet. Image models invent malformed Arabic on
+    # every sign, poster and book cover they are given the chance to, so the ban
+    # is total rather than "no caption".
+    if not (is_character_sheet or is_location_sheet):
+        add(0, safe_zone_prompt_clause())
 
-    # 9. Palette + continuity.
+    # 9. Palette + continuity. The colour script rides just behind the palette:
+    # it is the one sanctioned way a page may deviate, so it has to be read in
+    # the same breath as the palette it modifies or the model treats it as a
+    # licence to repaint the book.
     add(4, f"Palette: {_clean(payload.get('palette'))}." if _clean(payload.get("palette")) else "")
+    # handoff §9 — print-safe colour is mandatory in every image prompt without
+    # exception, so it rides at a priority the length-shedding pass never drops.
+    # The book prints Rich Coverage on coated stock; a deep-navy full bleed or a
+    # pure-black fill is a reprint, not a style note.
+    add(1, doctrine.print_safe_clause("en"))
+    color_script = _clean(payload.get("colorScript"))
+    if color_script:
+        add(4, f"Colour emphasis for this beat only (same palette): {color_script}.")
     continuity = (
         payload.get("continuity") if isinstance(payload.get("continuity"), dict) else {}
     )
@@ -5005,6 +6313,9 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
             if isinstance(page.get("locationId"), str):
                 story_page_location[page["id"]] = page["locationId"].strip()
     failures: list[str] = []
+    warnings: list[str] = []
+    depth_scores: list[dict[str, Any]] = []
+    previous_shot: tuple[str, str] | None = None
     orientation = book_orientation(book)
     theme_fingerprint: str | None = None
     resolved_theme_id: str | None = None
@@ -5060,6 +6371,34 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
 
         # Copyright-safe: scan every field that can reach the image model.
         failures.extend(scan_prompt_for_franchise_names(payload, asset["promptPath"]))
+
+        # Density: a prompt can pass every structural check above and still be
+        # too vague to draw twice the same way. This is the gate that forces the
+        # writer to name the colour, the material, and the light.
+        depth = promptdepth.gate(
+            payload,
+            asset_id=asset["id"],
+            threshold=getattr(args, "min_depth", None),
+        )
+        depth_scores.append(depth.as_dict())
+        failures.extend(f"{asset['promptPath']}: {msg}" for msg in depth.failures)
+        warnings.extend(f"{asset['promptPath']}: {msg}" for msg in depth.warnings)
+
+        # Shot variety, checked across pages rather than inside one. Two adjacent
+        # pages at the same scale from the same viewpoint read as one picture
+        # printed twice, and no single-page check can see it.
+        if asset["includeInPdf"] and asset["id"] not in COVER_ASSET_IDS:
+            shot = (
+                str(composition.get("shotScale") or "").strip().lower(),
+                str(composition.get("viewpoint") or "").strip().lower(),
+            )
+            if shot[0] and shot == previous_shot:
+                failures.append(
+                    f"{asset['promptPath']} repeats the previous page's shot "
+                    f"({shot[0]}, {shot[1]}). Change the scale or the viewpoint — "
+                    "adjacent pages that match read as the same drawing twice."
+                )
+            previous_shot = shot
 
         locks = payload.get("identityLocks")
         outfits = payload.get("fixedOutfits")
@@ -5155,19 +6494,7 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
                     )
 
         if asset["includeInPdf"]:
-            exact_text = asset.get("storyText") or ""
             compiled = payload["compiledPrompt"]
-            verbatim = (
-                payload.get("text", {}).get("verbatimArabic")
-                if isinstance(payload.get("text"), dict)
-                else None
-            )
-            if exact_text and exact_text not in compiled:
-                failures.append(f"exact story text missing from compiledPrompt: {asset['promptPath']}")
-            if exact_text and verbatim != exact_text:
-                failures.append(
-                    f"text.verbatimArabic must match story.json for {asset['promptPath']}"
-                )
             lower = compiled.lower()
             if len(on_page_ids) >= 2 and not any(
                 phrase in lower
@@ -5177,10 +6504,25 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
                     f"compiledPrompt must forbid identity swap when 2+ people: "
                     f"{asset['promptPath']} — run compile-prompts"
                 )
-            if "no hard white box" not in lower:
+            # The caption is drawn by the PDF builder, so the art must come back
+            # text-free with the band kept quiet. A prompt missing this clause
+            # produces art with baked-in gibberish Arabic under the real caption.
+            if "render no text" not in lower:
                 failures.append(
-                    f"compiledPrompt must forbid a hard white text box: "
+                    f"compiledPrompt must forbid text inside the image: "
                     f"{asset['promptPath']} — run compile-prompts"
+                )
+            # handoff §9 travels with every prompt, sheets included.
+            if "print-safe palette" not in lower:
+                failures.append(
+                    f"compiledPrompt is missing the handoff §9 print-safe palette "
+                    f"clause: {asset['promptPath']} — run compile-prompts"
+                )
+            exact_text = str(asset.get("storyText") or "").strip()
+            if exact_text and exact_text in compiled:
+                failures.append(
+                    f"story text must NOT appear in compiledPrompt — the caption "
+                    f"is a PDF text layer, not part of the art: {asset['promptPath']}"
                 )
     if failures:
         raise WorkflowError("Prompt validation failed:\n- " + "\n- ".join(failures))
@@ -5194,11 +6536,18 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
         "(character-sheet via Codex, then all PDF pages in parallel)"
     )
     save_book(project, book)
+    scores = [row["score"] for row in depth_scores] or [0]
     return {
         "valid": True,
         "promptCount": len(book["assets"]),
         "personaCount": len(persona_ids),
         "themeId": resolved_theme_id,
+        "depth": {
+            "min": min(scores),
+            "mean": round(sum(scores) / len(scores)),
+            "weakest": sorted(depth_scores, key=lambda r: r["score"])[:3],
+        },
+        "warnings": warnings,
         "nextAction": book["nextAction"],
     }
 
@@ -5217,11 +6566,38 @@ def active_fix_ids(book: dict[str, Any]) -> list[str]:
     ]
 
 
+def invalidate_pdf_and_reviews(book: dict[str, Any]) -> None:
+    """Invalidate every downstream decision after an image changes."""
+    for edition in ("draft", "final"):
+        entry = (book.get("pdf") or {}).get(edition)
+        if isinstance(entry, dict) and (entry.get("path") or entry.get("status") != "planned"):
+            entry["status"] = "stale"
+            entry["verifiedAt"] = None
+    review = book.setdefault("review", {})
+    review["status"] = "not_started"
+    review["mergedReviewPaths"] = []
+    review["fixQueue"] = []
+    review["manualReview"] = []
+    review["storyFixes"] = []
+    review["pdfFixes"] = []
+    review["imageFixes"] = []
+    review["draftSha256"] = None
+    review["storySha256"] = None
+    book["finalApproval"] = {
+        "status": "not_approved",
+        "approvedAt": None,
+        "statement": None,
+        "draftSha256": None,
+        "storySha256": None,
+    }
+
+
 def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
     require_asset_id(book, args.asset)
     ensure_consent(book)
+    approved_review = require_story_review_approved(project, book)
     asset = asset_by_id(book, args.asset)
     allow_parallel = bool(getattr(args, "allow_parallel", False))
     if asset["status"] == "generating" and not allow_parallel:
@@ -5232,10 +6608,13 @@ def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
     if args.asset.startswith("location-sheet-"):
         if not book.get("storyPath"):
             raise WorkflowError("Lock story.json before generating location sheets")
-        sheet = asset_by_id(book, "character-sheet")
-        if sheet["status"] != "accepted":
+        # Deliberately NOT gated on the character sheet. A location sheet is the
+        # empty place — no people in it at all — so it shares no identity state
+        # with the sheet and can render in the same wave. Serialising the two
+        # cost a whole dispatch round (and the accept pause) for nothing.
+        if asset["status"] == "planned":
             raise WorkflowError(
-                "Character sheet must be accepted before location sheets"
+                f"{args.asset} prompt is not validated yet — run validate-prompts"
             )
         if asset.get("imagePath") and not allow_parallel:
             raise WorkflowError(f"{args.asset} already has an image")
@@ -5278,12 +6657,31 @@ def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
 
     path = prompt_file(project, asset)
     payload = load_prompt_payload(path)
-    if asset["includeInPdf"] and asset["storyText"] not in payload["compiledPrompt"]:
-        raise WorkflowError(f"Current prompt does not contain exact story text: {path}")
+    # Story text is NOT embedded in image prompts. Since the overlay change the caption
+    # is drawn as a real PDF text layer at build time, and the art is generated text-free —
+    # so the prompt must carry the opposite instruction.
+    if asset["includeInPdf"] and asset["storyText"]:
+        compiled = payload["compiledPrompt"]
+        if asset["storyText"] in compiled:
+            raise WorkflowError(
+                f"Prompt embeds the story caption in the image: {path}. "
+                "Art must be text-free; the caption is added as a PDF text layer at build."
+            )
+        if "no text" not in compiled.lower():
+            raise WorkflowError(
+                f"Prompt is missing its no-text constraint: {path}. "
+                "Every page prompt must forbid text, letters, and signage in the image."
+            )
 
     if asset["status"] != "generating":
         asset["attempt"] += 1
     asset["status"] = "generating"
+    asset["storySha256"] = approved_review["storySha256"]
+    # Stamped here and closed in reconcile-image so the ETA extrapolates from
+    # this machine and this book instead of a hardcoded guess. A retry
+    # overwrites it: the useful number is how long the render that produced the
+    # kept image took.
+    asset["startedAt"] = now_iso()
     version = asset["promptVersion"]
     existing = next((item for item in asset["versions"] if item["version"] == version), None)
     if existing is None:
@@ -5295,11 +6693,13 @@ def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
                 "imagePath": None,
                 "reviewPath": None,
                 "status": "generating",
+                "storySha256": approved_review["storySha256"],
             }
         )
     else:
         existing["status"] = "generating"
         existing["attempt"] = asset["attempt"]
+        existing["storySha256"] = approved_review["storySha256"]
     book["status"] = "generating"
     book["nextAsset"] = args.asset
     book["nextAction"] = (
@@ -5365,9 +6765,17 @@ def update_next_after_image(book: dict[str, Any], asset_id: str) -> None:
 def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
+    # The user may edit story-review.md while a slow image call is in flight.
+    # Never accept those pixels against a story whose approval has gone stale.
+    approved_review = require_story_review_approved(project, book)
     asset = asset_by_id(book, args.asset)
     if asset["status"] != "generating":
         raise WorkflowError(f"{args.asset} is not awaiting reconcile (status={asset['status']})")
+    if asset.get("storySha256") != approved_review.get("storySha256"):
+        raise WorkflowError(
+            f"{args.asset} started against a different story approval. Discard this "
+            "output and generate it again from the current approved story."
+        )
     source = require_absolute(args.image, "image")
     width, height, image_format = validate_image(source)
 
@@ -5394,6 +6802,20 @@ def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
     destination = project / relative
     atomic_copy(source, destination)
     asset["imagePath"] = relative
+    asset["completedAt"] = now_iso()
+    started = asset.get("startedAt")
+    if isinstance(started, str):
+        try:
+            elapsed = (
+                datetime.fromisoformat(asset["completedAt"])
+                - datetime.fromisoformat(started)
+            ).total_seconds()
+        except ValueError:
+            elapsed = 0.0
+        # Guard against a resumed .tmp file whose startedAt is from a run that
+        # died hours ago — one absurd sample would poison the median ETA.
+        if 0 < elapsed <= CODEX_TIMEOUT_CEILING_SEC:
+            asset["durationSec"] = round(elapsed, 1)
     asset["status"] = "generated" if args.asset != "character-sheet" else "awaiting_review"
     version = asset["promptVersion"]
     for item in asset["versions"]:
@@ -5405,6 +6827,7 @@ def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
             item["format"] = image_format
             item["sha256"] = sha256(destination)
     update_next_after_image(book, args.asset)
+    invalidate_pdf_and_reviews(book)
     save_book(project, book)
     return {
         "asset": args.asset,
@@ -5476,12 +6899,168 @@ def ordered_pdf_assets(book: dict[str, Any]) -> list[dict[str, Any]]:
     missing = [asset["id"] for asset in assets if not asset.get("imagePath")]
     if missing:
         raise WorkflowError(f"Missing images for: {', '.join(missing)}")
+    approved_story = (book.get("storyReview") or {}).get("approvedStorySha256")
+    stale = [
+        asset["id"]
+        for asset in book.get("assets") or []
+        if isinstance(asset, dict)
+        and asset.get("imagePath")
+        and asset.get("storySha256") != approved_story
+    ]
+    if stale:
+        raise WorkflowError(
+            "Images were generated before the current story approval: "
+            + ", ".join(stale)
+            + ". Regenerate them; old art cannot be reused for changed scenes."
+        )
     return assets
+
+
+def pdf_asset_snapshot(
+    project: Path,
+    book: dict[str, Any],
+    assets: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, str]], str]:
+    """Bind one PDF to exact ordered pixels and exact overlaid page text."""
+    ordered = assets if assets is not None else ordered_pdf_assets(book)
+    snapshot: list[dict[str, str]] = []
+    for asset in ordered:
+        image_path = project / str(asset["imagePath"])
+        if not image_path.is_file():
+            raise WorkflowError(f"Missing image for PDF snapshot: {image_path}")
+        text = str(asset.get("storyText") or "")
+        snapshot.append(
+            {
+                "assetId": str(asset["id"]),
+                "imageSha256": sha256(image_path),
+                "storyTextSha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            }
+        )
+    encoded = json.dumps(
+        snapshot,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return snapshot, hashlib.sha256(encoded).hexdigest()
+
+
+def require_pdf_asset_snapshot(
+    project: Path,
+    book: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    edition: str,
+) -> str:
+    _snapshot, current_sha = pdf_asset_snapshot(project, book)
+    if entry.get("assetSnapshotSha256") != current_sha:
+        raise WorkflowError(
+            f"{edition} PDF was built from older page images or story captions. "
+            "Rebuild it; an old PDF cannot be re-verified after asset changes."
+        )
+    return current_sha
 
 
 def next_pdf_path(project: Path, book: dict[str, Any], edition: str) -> Path:
     _ = book
     return output_dir(project) / "pdf" / f"{edition}.pdf"
+
+
+def current_verified_draft_sha(project: Path, book: dict[str, Any]) -> str:
+    entry = (book.get("pdf") or {}).get("draft") or {}
+    if entry.get("status") != "verified" or not entry.get("path"):
+        raise WorkflowError("Build and verify the current draft PDF first")
+    path = project / str(entry["path"])
+    if not path.is_file():
+        raise WorkflowError(f"Missing verified draft PDF: {path}")
+    actual = sha256(path)
+    if actual != entry.get("sha256"):
+        raise WorkflowError("Draft PDF changed after verification; rebuild and verify it")
+    require_pdf_asset_snapshot(project, book, entry, edition="draft")
+    approved_story = require_story_review_approved(project, book)["storySha256"]
+    if entry.get("storySha256") != approved_story:
+        raise WorkflowError("Verified draft belongs to an older story approval")
+    return actual
+
+
+def require_final_approval(project: Path, book: dict[str, Any]) -> dict[str, Any]:
+    draft_sha = current_verified_draft_sha(project, book)
+    review = book.get("review") or {}
+    if review.get("status") != "passed":
+        raise WorkflowError(
+            "All four current draft reviews must pass before final approval"
+        )
+    if (
+        review.get("fixQueue")
+        or review.get("manualReview")
+        or review.get("storyFixes")
+        or review.get("pdfFixes")
+    ):
+        raise WorkflowError("Resolve every automatic and manual review item first")
+    story_sha = require_story_review_approved(project, book)["storySha256"]
+    if (
+        review.get("draftSha256") != draft_sha
+        or review.get("storySha256") != story_sha
+    ):
+        raise WorkflowError(
+            "Passed reviews belong to an older draft or story. Rerun all four "
+            "reviewers against the current verified draft."
+        )
+    approval = book.get("finalApproval") or {}
+    if (
+        approval.get("status") != "approved"
+        or approval.get("draftSha256") != draft_sha
+        or approval.get("storySha256") != story_sha
+    ):
+        raise WorkflowError(
+            "User has not approved this exact verified draft. Run approve-final "
+            "with the user's explicit statement."
+        )
+    return approval
+
+
+def command_approve_final(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    statement = str(args.statement or "").strip()
+    if len(statement) < 3:
+        raise WorkflowError("Final approval statement is too short")
+    draft_sha = current_verified_draft_sha(project, book)
+    review = book.get("review") or {}
+    if review.get("status") != "passed":
+        raise WorkflowError("Current draft reviews have not all passed")
+    if (
+        review.get("fixQueue")
+        or review.get("manualReview")
+        or review.get("storyFixes")
+        or review.get("pdfFixes")
+    ):
+        raise WorkflowError("Resolve every review item before user final approval")
+    story_sha = require_story_review_approved(project, book)["storySha256"]
+    if (
+        review.get("draftSha256") != draft_sha
+        or review.get("storySha256") != story_sha
+    ):
+        raise WorkflowError(
+            "The passed reviews are stale. Rerun all four reviewers against this "
+            "verified draft before asking for final approval."
+        )
+    book["finalApproval"] = {
+        "status": "approved",
+        "approvedAt": now_iso(),
+        "statement": statement,
+        "draftSha256": draft_sha,
+        "storySha256": story_sha,
+    }
+    book["status"] = "final_approved"
+    book["nextAction"] = "Build and verify the final PDF."
+    save_book(project, book)
+    return {
+        "decision": "approved",
+        "draftSha256": draft_sha,
+        "storySha256": story_sha,
+        "nextAction": book["nextAction"],
+    }
 
 
 def image_aspect(image_path: Path) -> float:
@@ -5518,9 +7097,156 @@ def draw_full_bleed(pdf: Any, image_path: Path, page_width: float, page_height: 
     )
 
 
+CAPTION_FONT_NAME = "HekayatiArabic"
+# Ink colour for the caption. Near-black rather than pure black so it sits on
+# painted art without looking like a pasted-on UI label.
+CAPTION_FILL = (0.09, 0.09, 0.12)
+# A soft light plate under the text. The art is told to keep this band calm, but
+# calm is not the same as uniform, and a faint scrim keeps the caption legible
+# over a busy sunset without becoming the "hard white box" we ban in the art.
+CAPTION_SCRIM_ALPHA = 0.55
+
+
+def register_caption_font(book: dict[str, Any]) -> str:
+    """Register the Arabic display font with reportlab and return its name.
+
+    The font is embedded in the PDF, so the caption survives on machines that
+    have never seen it.
+    """
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    if CAPTION_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return CAPTION_FONT_NAME
+    font_path = resolve_arabic_font(book.get("settings") or {})
+    font = TTFont(CAPTION_FONT_NAME, str(font_path))
+    pdfmetrics.registerFont(font)
+    _CAPTION_FONT_PATH[CAPTION_FONT_NAME] = font_path
+    return CAPTION_FONT_NAME
+
+
+# Resolved path per registered font, for the coverage error message.
+_CAPTION_FONT_PATH: dict[str, Path] = {}
+
+
+def _font_covers(font_name: str) -> Any:
+    """Predicate: can this registered font actually draw the given character?"""
+    from reportlab.pdfbase import pdfmetrics
+
+    face = pdfmetrics.getFont(font_name).face
+    char_to_glyph = getattr(face, "charToGlyph", None)
+    if not char_to_glyph:
+        return lambda _ch: True  # non-TTF face; nothing to check against
+    return lambda ch: ord(ch) in char_to_glyph
+
+
+def _actual_text_operators(logical: str) -> tuple[str, str]:
+    """Marked-content operators that tag a text run with its logical string.
+
+    reportlab exposes no marked-content API, so the two operators go into the
+    page content stream directly. /ActualText is a PDF *text string*: UTF-16BE
+    with a byte-order mark, written as hex so no character needs escaping.
+    """
+    payload = "FEFF" + logical.encode("utf-16-be").hex().upper()
+    return f"/Span << /ActualText <{payload}> >> BDC", "EMC"
+
+
+def _emit(pdf: Any, operator: str) -> None:
+    """Append a raw operator to the current page's content stream."""
+    pdf._code.append(operator)
+
+
+def draw_caption(
+    pdf: Any,
+    text: str,
+    page_width: float,
+    page_height: float,
+    font_name: str,
+) -> dict[str, Any]:
+    """Draw one page's story text as real, selectable PDF text.
+
+    The drawn string is visually ordered and contextually shaped, because
+    reportlab does neither. That would normally make copy/paste and text
+    extraction return presentation forms in reverse, so each line is wrapped in
+    a marked-content span carrying the logical Arabic as /ActualText — that is
+    what a PDF reader hands back on copy, and what `verify` checks.
+    """
+    from reportlab.pdfbase import pdfmetrics
+
+    zone = safe_zone_rect(page_width, page_height)
+
+    def measure(value: str, size: float) -> float:
+        return pdfmetrics.stringWidth(value, font_name, size)
+
+    layout = layout_caption(text, zone, measure)
+
+    covered = _font_covers(font_name)
+    absent = missing_glyphs("".join(line.shaped for line in layout.lines), covered)
+    if absent:
+        font_path = _CAPTION_FONT_PATH.get(font_name, Path(font_name))
+        raise TextLayoutError(
+            f"the caption font ({font_path.name}) cannot draw "
+            f"{len(absent)} character(s): {' '.join(absent)}. They would print as "
+            "blank boxes. Supply a fuller Arabic .ttf via settings.textFont or "
+            f"{FONT_ENV_VAR}."
+        )
+
+    pdf.saveState()
+    pdf.setFillColorRGB(1, 1, 1, alpha=CAPTION_SCRIM_ALPHA)
+    pdf.roundRect(
+        zone.x, zone.y, zone.width, zone.height, radius=zone.height * 0.12, fill=1, stroke=0
+    )
+    pdf.setFillColorRGB(*CAPTION_FILL)
+    pdf.setFont(font_name, layout.font_size)
+    for line in layout.lines:
+        begin, end = _actual_text_operators(line.logical)
+        _emit(pdf, begin)
+        pdf.drawString(line.x, line.baseline, line.shaped)
+        _emit(pdf, end)
+    pdf.restoreState()
+    return {
+        "fontSize": layout.font_size,
+        "lineCount": len(layout.lines),
+        "text": layout.logical_text,
+    }
+
+
 def command_build(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
+    approved_review = require_story_review_approved(project, book)
+    if args.edition == "final":
+        final_approval = require_final_approval(project, book)
+        draft_entry = (book.get("pdf") or {}).get("draft") or {}
+        draft_path = project / str(draft_entry["path"])
+        destination = next_pdf_path(project, book, "final")
+        atomic_copy(draft_path, destination)
+        digest = sha256(destination)
+        if digest != final_approval["draftSha256"]:
+            raise WorkflowError(
+                "Final copy does not match the exact user-approved draft bytes"
+            )
+        relative = str(destination.relative_to(project))
+        book["pdf"]["final"] = {
+            "status": "built",
+            "path": relative,
+            "sha256": digest,
+            "builtAt": now_iso(),
+            "storySha256": approved_review["storySha256"],
+            "assetSnapshot": copy.deepcopy(draft_entry.get("assetSnapshot") or []),
+            "assetSnapshotSha256": draft_entry.get("assetSnapshotSha256"),
+            "sourceDraftSha256": final_approval["draftSha256"],
+        }
+        book["status"] = "final_built"
+        book["nextAction"] = "Run verify --edition final"
+        save_book(project, book)
+        return {
+            "pdf": str(destination),
+            "sha256": digest,
+            "sourceDraftSha256": final_approval["draftSha256"],
+            "copiedFromApprovedDraft": True,
+            "nextAction": book["nextAction"],
+        }
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
@@ -5530,6 +7256,7 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         ) from exc
 
     assets = ordered_pdf_assets(book)
+    asset_snapshot, asset_snapshot_sha = pdf_asset_snapshot(project, book, assets)
     # Page size comes from the book's declared orientation, not from whatever
     # aspect the first image happened to come back as.
     orientation = book_orientation(book)
@@ -5544,10 +7271,19 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
     destination = next_pdf_path(project, book, args.edition)
     destination.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(destination), pagesize=(page_width, page_height))
+    font_name = register_caption_font(book)
+    captions: list[dict[str, Any]] = []
     for asset in assets:
         image_path = project / asset["imagePath"]
         validate_image(image_path)
         draw_full_bleed(pdf, image_path, page_width, page_height)
+        story_text = str(asset.get("storyText") or "").strip()
+        if story_text:
+            try:
+                drawn = draw_caption(pdf, story_text, page_width, page_height, font_name)
+            except TextLayoutError as exc:
+                raise WorkflowError(f"{asset['id']}: {exc}") from exc
+            captions.append({"assetId": asset["id"], **drawn})
         pdf.showPage()
     pdf.save()
     digest = sha256(destination)
@@ -5557,7 +7293,33 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         "path": relative,
         "sha256": digest,
         "builtAt": now_iso(),
+        "storySha256": approved_review["storySha256"],
+        "assetSnapshot": asset_snapshot,
+        "assetSnapshotSha256": asset_snapshot_sha,
+        "sourceDraftSha256": None,
     }
+    if args.edition == "draft":
+        review = book.setdefault("review", {})
+        review["status"] = "not_started"
+        review["mergedReviewPaths"] = []
+        review["fixQueue"] = []
+        review["manualReview"] = []
+        review["storyFixes"] = []
+        review["pdfFixes"] = []
+        review["imageFixes"] = []
+        review["draftSha256"] = None
+        review["storySha256"] = None
+        book["finalApproval"] = {
+            "status": "not_approved",
+            "approvedAt": None,
+            "statement": None,
+            "draftSha256": None,
+            "storySha256": None,
+        }
+        final_entry = (book.get("pdf") or {}).get("final")
+        if isinstance(final_entry, dict) and final_entry.get("path"):
+            final_entry["status"] = "stale"
+            final_entry["verifiedAt"] = None
     book["status"] = "draft_built" if args.edition == "draft" else "final_built"
     book["nextAction"] = f"Run verify --edition {args.edition}"
     save_book(project, book)
@@ -5565,19 +7327,128 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         "pdf": str(destination),
         "sha256": digest,
         "orientation": orientation,
+        "captionCount": len(captions),
+        "captions": captions,
         "nextAction": book["nextAction"],
     }
+
+
+ACTUAL_TEXT_SPAN = re.compile(rb"/ActualText\s*<([0-9A-Fa-f]+)>")
+
+
+def page_caption_text(page: Any) -> str:
+    """Logical Arabic recovered from a built page's /ActualText spans.
+
+    Deliberately not `extract_text()`. The drawn glyph run is visually ordered
+    and contextually shaped, and extractors disagree about whether to honour
+    /ActualText — pypdf currently does not, and returns reversed presentation
+    forms with gaps. The /ActualText span is the authoritative copy of the
+    caption and is exactly what a PDF reader hands over on copy, so that is what
+    gets checked.
+    """
+    contents = page.get_contents()
+    if contents is None:
+        return ""
+    parts: list[str] = []
+    for match in ACTUAL_TEXT_SPAN.finditer(contents.get_data()):
+        raw = bytes.fromhex(match.group(1).decode("ascii"))
+        if raw.startswith(b"\xfe\xff"):  # UTF-16BE byte-order mark
+            raw = raw[2:]
+        parts.append(raw.decode("utf-16-be", "replace"))
+    return " ".join(parts)
+
+
+def _caption_survived(story_text: str, page_text: str) -> bool:
+    """True when the page carries this caption as recoverable logical text."""
+    return " ".join(str(page_text).split()) == " ".join(str(story_text).split())
+
+
+def embedded_pdf_fonts(reader: Any) -> list[str]:
+    """Return font names whose program is embedded in at least one page."""
+    names: set[str] = set()
+    for page in reader.pages:
+        resources = page.get("/Resources") or {}
+        fonts = resources.get("/Font") or {}
+        fonts = fonts.get_object() if hasattr(fonts, "get_object") else fonts
+        for reference in fonts.values():
+            font = reference.get_object() if hasattr(reference, "get_object") else reference
+            descriptor = font.get("/FontDescriptor") if hasattr(font, "get") else None
+            if descriptor is None:
+                continue
+            descriptor = (
+                descriptor.get_object()
+                if hasattr(descriptor, "get_object")
+                else descriptor
+            )
+            if any(key in descriptor for key in ("/FontFile", "/FontFile2", "/FontFile3")):
+                names.add(str(font.get("/BaseFont") or "embedded-font"))
+    return sorted(names)
+
+
+def run_pdf_tool(command: list[str], *, label: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WorkflowError(f"{label} timed out after {timeout} seconds") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise WorkflowError(f"{label} failed: {detail}")
+    return proc
 
 
 def command_verify(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
+    approved_review = require_story_review_approved(project, book)
+    final_approval: dict[str, Any] | None = None
+    if args.edition == "final":
+        final_approval = require_final_approval(project, book)
     entry = book["pdf"].get(args.edition) or {}
     if not entry.get("path"):
         raise WorkflowError(f"No {args.edition} PDF built yet")
+    if entry.get("status") not in {"built", "verified"}:
+        raise WorkflowError(
+            f"{args.edition} PDF status is {entry.get('status')!r}, not built. "
+            "Rebuild it before verification."
+        )
     pdf_path = project / entry["path"]
     if not pdf_path.is_file():
         raise WorkflowError(f"Missing PDF: {pdf_path}")
+    actual_pdf_sha = sha256(pdf_path)
+    if actual_pdf_sha != entry.get("sha256"):
+        raise WorkflowError(
+            f"{args.edition} PDF changed after build. Rebuild it before verification."
+        )
+    if entry.get("storySha256") != approved_review["storySha256"]:
+        raise WorkflowError(
+            f"{args.edition} PDF belongs to an older story approval. Rebuild it."
+        )
+    if args.edition == "final" and (
+        entry.get("sourceDraftSha256") != final_approval.get("draftSha256")
+        or entry.get("sha256") != final_approval.get("draftSha256")
+    ):
+        raise WorkflowError(
+            "Final PDF is not the exact currently approved draft. Build final again "
+            "from this approval before verification."
+        )
+    require_pdf_asset_snapshot(project, book, entry, edition=args.edition)
+
+    qpdf = shutil.which("qpdf")
+    if not qpdf:
+        raise WorkflowError(
+            "qpdf is required for structural PDF verification. Install it with "
+            "brew install qpdf (or your platform package manager)."
+        )
+    run_pdf_tool(
+        [qpdf, "--check", str(pdf_path)],
+        label=f"qpdf check for {pdf_path.name}",
+    )
 
     try:
         from pypdf import PdfReader
@@ -5595,7 +7466,31 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
     if page_count != expected:
         raise WorkflowError(f"PDF page count is {page_count}, expected {expected}")
 
-    Image, _, _ = import_pillow()
+    # The whole point of the text layer is that it survives as text. A page
+    # whose caption does not come back out of the PDF is a silently broken
+    # book: it looks right on screen and cannot be edited or read aloud by a
+    # screen reader.
+    missing_text: list[str] = []
+    for index, asset_id in enumerate(pdf_ids(book)):
+        story_text = str(asset_by_id(book, asset_id).get("storyText") or "").strip()
+        if not story_text:
+            continue
+        if not _caption_survived(story_text, page_caption_text(reader.pages[index])):
+            missing_text.append(asset_id)
+    if missing_text:
+        raise WorkflowError(
+            f"{len(missing_text)} page(s) lost their text layer: "
+            f"{', '.join(missing_text)}. Rebuild — the caption must extract as "
+            "real Arabic so the PDF stays editable."
+        )
+    if any(str(asset_by_id(book, asset_id).get("storyText") or "").strip() for asset_id in pdf_ids(book)):
+        embedded_fonts = embedded_pdf_fonts(reader)
+        if not embedded_fonts:
+            raise WorkflowError(
+                "PDF captions have no embedded font program. Rebuild with the "
+                "bundled Arabic font before handoff."
+            )
+
     render_dir = output_dir(project) / "renders" / args.edition
     if render_dir.exists():
         shutil.rmtree(render_dir)
@@ -5618,9 +7513,6 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
                     "expected": round(expected_ratio, 3),
                 }
             )
-        target = render_dir / f"{index:02d}-{asset_id}.png"
-        atomic_copy(image_path, target)
-
     if off_ratio:
         detail = ", ".join(
             f"{row['assetId']} ({row['aspect']} vs {row['expected']})"
@@ -5632,6 +7524,32 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
             "get cropped in the PDF and make the book look inconsistent."
         )
 
+    pdftoppm = shutil.which("pdftoppm")
+    if not pdftoppm:
+        raise WorkflowError(
+            "pdftoppm is required to render the actual PDF pages for visual review. "
+            "Install Poppler (brew install poppler)."
+        )
+    render_prefix = render_dir / "page"
+    run_pdf_tool(
+        [pdftoppm, "-png", "-r", "144", str(pdf_path), str(render_prefix)],
+        label=f"PDF render for {pdf_path.name}",
+    )
+    raw_renders = sorted(
+        render_dir.glob("page-*.png"),
+        key=lambda path: int(path.stem.rsplit("-", 1)[-1]),
+    )
+    if len(raw_renders) != expected:
+        raise WorkflowError(
+            f"PDF renderer produced {len(raw_renders)} pages, expected {expected}"
+        )
+    rendered_pages: list[str] = []
+    for index, (raw, asset_id) in enumerate(zip(raw_renders, pdf_ids(book)), start=1):
+        target = render_dir / f"{index:02d}-{asset_id}.png"
+        raw.replace(target)
+        validate_image(target)
+        rendered_pages.append(str(target))
+
     entry["status"] = "verified"
     entry["verifiedAt"] = now_iso()
     book["pdf"][args.edition] = entry
@@ -5640,7 +7558,7 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
         book["nextAction"] = (
             "Show draft PDF to user AND auto-start reviewers "
             "(story/arabic/continuity/pdf). Save review JSON under output/reviews/. "
-            "Iterate fixes with user until satisfied, then build final."
+            "Every review must include this draftSha256 and storySha256."
         )
     else:
         book["status"] = "complete"
@@ -5651,7 +7569,10 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
         "pageCount": page_count,
         "orientation": orientation,
         "renders": str(render_dir),
+        "renderedPages": rendered_pages,
         "pdf": str(pdf_path),
+        "draftSha256": actual_pdf_sha if args.edition == "draft" else None,
+        "storySha256": approved_review["storySha256"],
         "nextAction": book["nextAction"],
     }
 
@@ -5689,21 +7610,43 @@ def normalize_issue(issue: Any, role: str, allowed_ids: list[str]) -> dict[str, 
     asset_id = issue.get("assetId")
     if asset_id not in allowed_ids:
         raise WorkflowError(f"{role} review has unknown assetId: {asset_id!r}")
-    severity = issue.get("severity")
-    if severity not in {"blocking", "note"}:
-        raise WorkflowError(f"{role} issue severity must be blocking|note")
-    instruction = str(issue.get("revisionInstruction", "")).strip()
+    # Rubric severity (critical|high|medium|low) or pipeline (blocking|note).
+    raw_severity = str(issue.get("severity", "")).strip()
+    if raw_severity in {"critical", "high"}:
+        severity = "blocking"
+    elif raw_severity in {"medium", "low"}:
+        severity = "note"
+    elif raw_severity in {"blocking", "note"}:
+        severity = raw_severity
+    else:
+        raise WorkflowError(
+            f"{role} issue severity must be blocking|note or "
+            "critical|high|medium|low"
+        )
+    instruction = str(
+        issue.get("revisionInstruction") or issue.get("fix") or ""
+    ).strip()
     if severity == "blocking" and not instruction:
         raise WorkflowError(
             f"{role} blocking issue for {asset_id} needs revisionInstruction"
         )
+    fix_target = str(issue.get("fixTarget") or "none").strip().lower()
+    if fix_target not in {"image", "story", "pdf", "none"}:
+        raise WorkflowError(
+            f"{role} issue fixTarget must be image|story|pdf|none"
+        )
+    if severity == "blocking" and fix_target == "none":
+        raise WorkflowError(
+            f"{role} blocking issue for {asset_id} needs fixTarget image|story|pdf"
+        )
     return {
         "assetId": asset_id,
         "severity": severity,
-        "code": str(issue.get("code", "unspecified")),
-        "evidence": str(issue.get("evidence", "")),
+        "code": str(issue.get("code") or issue.get("category") or "unspecified"),
+        "evidence": str(issue.get("evidence") or issue.get("detail") or ""),
         "revisionInstruction": instruction or None,
         "reviewerRole": role,
+        "fixTarget": fix_target,
     }
 
 
@@ -5711,8 +7654,8 @@ def command_merge_reviews(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
     allowed_ids = pdf_ids(book)
-    if book["pdf"]["draft"].get("status") != "verified":
-        raise WorkflowError("Verify the current draft PDF before merging reviews")
+    draft_sha = current_verified_draft_sha(project, book)
+    story_sha = require_story_review_approved(project, book)["storySha256"]
     if len(args.review) != 4:
         raise WorkflowError("Exactly four review JSON files are required")
     payloads: dict[str, dict[str, Any]] = {}
@@ -5724,54 +7667,112 @@ def command_merge_reviews(args: argparse.Namespace) -> dict[str, Any]:
             raise WorkflowError(f"Invalid reviewerRole in {path}: {role!r}")
         if role in payloads:
             raise WorkflowError(f"Duplicate reviewerRole: {role}")
+        if payload.get("draftSha256") != draft_sha:
+            raise WorkflowError(
+                f"{role} review is not bound to the current verified draftSha256"
+            )
+        if payload.get("storySha256") != story_sha:
+            raise WorkflowError(
+                f"{role} review is not bound to the current approved storySha256"
+            )
+        decision = payload.get("decision")
+        if decision not in {"accept", "revise"}:
+            raise WorkflowError(
+                f"{role} review decision must be exactly accept or revise"
+            )
+        if not isinstance(payload.get("issues"), list):
+            raise WorkflowError(f"{role} review issues must be a list")
         payloads[role] = payload
     if set(payloads) != REVIEWER_ROLES:
         raise WorkflowError(f"Reviews must cover: {', '.join(sorted(REVIEWER_ROLES))}")
 
     review_pass = book["review"].get("pass", 0) + 1
-    issues_by_asset: dict[str, list[dict[str, Any]]] = {}
+    image_issues_by_asset: dict[str, list[dict[str, Any]]] = {}
+    story_fixes: list[dict[str, Any]] = []
+    pdf_fixes: list[dict[str, Any]] = []
     saved_paths: list[str] = []
     for role, payload in payloads.items():
         normalized = [
             normalize_issue(issue, role, allowed_ids)
-            for issue in payload.get("issues", [])
+            for issue in payload["issues"]
         ]
-        stored = {**payload, "pass": review_pass, "issues": normalized}
+        blocking_for_role = [
+            issue for issue in normalized if issue["severity"] == "blocking"
+        ]
+        if payload["decision"] == "revise" and not blocking_for_role:
+            raise WorkflowError(
+                f"{role} review says revise but has no blocking issue"
+            )
+        if payload["decision"] == "accept" and blocking_for_role:
+            raise WorkflowError(
+                f"{role} review says accept but contains blocking issues"
+            )
+        stored = {
+            **payload,
+            "pass": review_pass,
+            "draftSha256": draft_sha,
+            "storySha256": story_sha,
+            "issues": normalized,
+        }
         destination = (
             output_dir(project) / "reviews" / f"pass-{review_pass:02d}-{role}.json"
         )
         saved_paths.append(persist_review(project, stored, destination))
         for issue in normalized:
             if issue["severity"] == "blocking":
-                issues_by_asset.setdefault(issue["assetId"], []).append(issue)
+                if issue["fixTarget"] == "image":
+                    image_issues_by_asset.setdefault(issue["assetId"], []).append(issue)
+                elif issue["fixTarget"] == "story":
+                    story_fixes.append(issue)
+                elif issue["fixTarget"] == "pdf":
+                    pdf_fixes.append(issue)
 
     fix_queue: list[dict[str, Any]] = []
     manual: list[dict[str, Any]] = []
-    for asset_id in allowed_ids:
-        issues = issues_by_asset.get(asset_id)
-        if not issues:
+    if not story_fixes:
+        for asset_id in allowed_ids:
+            issues = image_issues_by_asset.get(asset_id)
+            if not issues:
+                asset = asset_by_id(book, asset_id)
+                if asset.get("imagePath") and asset["status"] != "needs_manual_review":
+                    asset["status"] = "accepted"
+                continue
             asset = asset_by_id(book, asset_id)
-            if asset.get("imagePath") and asset["status"] != "needs_manual_review":
-                asset["status"] = "accepted"
-            continue
-        asset = asset_by_id(book, asset_id)
-        entry = {"assetId": asset_id, "issues": issues, "attempt": asset["attempt"]}
-        if asset["attempt"] < MAX_ATTEMPTS:
-            asset["status"] = "needs_revision"
-            asset["promptVersion"] += 1
-            asset["promptPath"] = (
-                f"input/prompts/{asset_id}.v{asset['promptVersion']:02d}.json"
-            )
-            fix_queue.append(entry)
-        else:
-            asset["status"] = "needs_manual_review"
-            manual.append(entry)
+            entry = {"assetId": asset_id, "issues": issues, "attempt": asset["attempt"]}
+            if asset["attempt"] < MAX_ATTEMPTS:
+                asset["status"] = "needs_revision"
+                asset["promptVersion"] += 1
+                asset["promptPath"] = (
+                    f"input/prompts/{asset_id}.v{asset['promptVersion']:02d}.json"
+                )
+                fix_queue.append(entry)
+            else:
+                asset["status"] = "needs_manual_review"
+                manual.append(entry)
 
     book["review"]["pass"] = review_pass
     book["review"]["mergedReviewPaths"] = saved_paths
     book["review"]["fixQueue"] = fix_queue
     book["review"]["manualReview"] = manual
-    if fix_queue:
+    book["review"]["storyFixes"] = story_fixes
+    book["review"]["pdfFixes"] = pdf_fixes
+    book["review"]["imageFixes"] = [
+        issue
+        for asset_id in allowed_ids
+        for issue in image_issues_by_asset.get(asset_id, [])
+    ]
+    book["review"]["draftSha256"] = draft_sha
+    book["review"]["storySha256"] = story_sha
+    if story_fixes:
+        book["review"]["status"] = "story_revision_required"
+        book["status"] = "story_revision_required"
+        book["nextAsset"] = None
+        book["nextAction"] = (
+            "Story/text fixes cannot be solved by regenerating images. Run "
+            "reopen-story-review with the user/editor statement; old prompts, "
+            "images, and PDFs will be archived in state and invalidated."
+        )
+    elif fix_queue:
         book["review"]["status"] = "fixes_pending"
         book["status"] = "fixing"
         book["nextAsset"] = fix_queue[0]["assetId"]
@@ -5782,17 +7783,182 @@ def command_merge_reviews(args: argparse.Namespace) -> dict[str, Any]:
         )
     else:
         book["review"]["status"] = "manual_review" if manual else "passed"
-        book["status"] = "final_ready"
         book["nextAsset"] = None
-        book["nextAction"] = (
-            "No automatic fixes left. Ask user if satisfied; if yes build final PDF, "
-            "else apply user notes and continue review loop."
-        )
+        if manual:
+            book["status"] = "manual_review"
+            book["nextAction"] = (
+                "Attempt limit reached. For each manualReview asset, run "
+                "resolve-manual-review with either --accept or --image plus the "
+                "user/editor statement."
+            )
+        elif pdf_fixes:
+            book["review"]["status"] = "pdf_fixes_pending"
+            book["status"] = "pdf_fixes_pending"
+            book["nextAction"] = (
+                "PDF/layout fixes are pending. Correct the layout/font/build setting, "
+                "then rebuild and verify the draft; do not spend an image attempt."
+            )
+        else:
+            book["status"] = "final_ready"
+            book["nextAction"] = (
+                "No automatic fixes left. Show the verified draft to the user. If "
+                "they explicitly approve it, run approve-final with their statement; "
+                "otherwise apply their notes and continue the review loop."
+            )
     save_book(project, book)
     return {
         "pass": review_pass,
         "fixQueue": [entry["assetId"] for entry in fix_queue],
         "manualReview": [entry["assetId"] for entry in manual],
+        "storyFixes": len(story_fixes),
+        "pdfFixes": len(pdf_fixes),
+        "nextAction": book["nextAction"],
+    }
+
+
+def command_resolve_manual_review(args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve an attempt-limit issue without hand-editing book.json."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    statement = str(args.statement or "").strip()
+    if len(statement) < 3:
+        raise WorkflowError("Manual-review resolution statement is too short")
+    review = book.get("review") or {}
+    if review.get("fixQueue"):
+        raise WorkflowError(
+            "Finish automatic fixQueue items, rebuild, and rerun reviewers before "
+            "resolving attempt-limit manual items."
+        )
+    manual = review.get("manualReview") or []
+    entry = next(
+        (
+            item
+            for item in manual
+            if isinstance(item, dict) and item.get("assetId") == args.asset
+        ),
+        None,
+    )
+    if entry is None:
+        raise WorkflowError(f"{args.asset} is not in the current manualReview queue")
+    draft_sha = current_verified_draft_sha(project, book)
+    story_sha = require_story_review_approved(project, book)["storySha256"]
+    if (
+        review.get("draftSha256") != draft_sha
+        or review.get("storySha256") != story_sha
+    ):
+        raise WorkflowError("Manual-review queue belongs to an older draft or story")
+    asset = asset_by_id(book, args.asset)
+    resolutions = list(review.get("manualResolutions") or [])
+
+    if bool(getattr(args, "accept", False)):
+        asset["status"] = "accepted"
+        remaining = [item for item in manual if item is not entry]
+        review["manualReview"] = remaining
+        resolutions.append(
+            {
+                "assetId": args.asset,
+                "decision": "accept-existing",
+                "statement": statement,
+                "resolvedAt": now_iso(),
+                "draftSha256": draft_sha,
+                "storySha256": story_sha,
+            }
+        )
+        review["manualResolutions"] = resolutions
+        if remaining:
+            review["status"] = "manual_review"
+            book["status"] = "manual_review"
+            book["nextAction"] = (
+                "Resolve remaining manualReview assets: "
+                + ", ".join(str(item.get("assetId")) for item in remaining)
+            )
+        else:
+            review["status"] = "passed"
+            book["status"] = "final_ready"
+            book["nextAction"] = (
+                "Show the exact verified draft to the user. If approved, run "
+                "approve-final with their explicit statement."
+            )
+        book["review"] = review
+        save_book(project, book)
+        return {
+            "asset": args.asset,
+            "decision": "accept-existing",
+            "remainingManualReview": [
+                item.get("assetId") for item in remaining if isinstance(item, dict)
+            ],
+            "nextAction": book["nextAction"],
+        }
+
+    source = require_absolute(args.image, "image")
+    width, height, image_format = validate_image(source)
+    expected_ratio = ORIENTATION_RATIOS[book_orientation(book)]
+    actual_ratio = width / height
+    if abs(actual_ratio - expected_ratio) / expected_ratio > ASPECT_TOLERANCE:
+        raise WorkflowError(
+            f"Manual replacement aspect {actual_ratio:.3f} does not match book "
+            f"orientation ratio {expected_ratio:.3f}"
+        )
+    digest = sha256(source)
+    for other in book.get("assets") or []:
+        if not isinstance(other, dict) or other.get("id") == args.asset:
+            continue
+        other_rel = other.get("imagePath")
+        if not other_rel:
+            continue
+        other_path = project / str(other_rel)
+        if other_path.is_file() and sha256(other_path) == digest:
+            raise WorkflowError(
+                f"Manual replacement for {args.asset} is byte-identical to "
+                f"{other.get('id')}"
+            )
+    revision = int(asset.get("manualRevision") or 0) + 1
+    suffix = source.suffix.lower() or ".png"
+    relative = f"output/images/{args.asset}.manual-{revision:02d}{suffix}"
+    destination = project / relative
+    atomic_copy(source, destination)
+    asset["manualRevision"] = revision
+    asset["imagePath"] = relative
+    asset["storySha256"] = story_sha
+    asset["status"] = "generated"
+    asset.setdefault("manualResolutions", []).append(
+        {
+            "decision": "replace-image",
+            "statement": statement,
+            "resolvedAt": now_iso(),
+            "imagePath": relative,
+            "sha256": sha256(destination),
+            "width": width,
+            "height": height,
+            "format": image_format,
+            "sourceDraftSha256": draft_sha,
+            "storySha256": story_sha,
+        }
+    )
+    invalidate_pdf_and_reviews(book)
+    book.setdefault("review", {})["manualResolutions"] = resolutions + [
+        {
+            "assetId": args.asset,
+            "decision": "replace-image",
+            "statement": statement,
+            "resolvedAt": now_iso(),
+            "sourceDraftSha256": draft_sha,
+            "storySha256": story_sha,
+            "imagePath": relative,
+        }
+    ]
+    book["status"] = "draft_ready"
+    book["nextAsset"] = None
+    book["nextAction"] = (
+        "Manual replacement saved. Build and verify a fresh draft, then rerun all "
+        "four reviewers."
+    )
+    save_book(project, book)
+    return {
+        "asset": args.asset,
+        "decision": "replace-image",
+        "image": str(destination),
+        "sha256": sha256(destination),
         "nextAction": book["nextAction"],
     }
 
@@ -5812,6 +7978,10 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
         "nextAction": book.get("nextAction"),
         "consent": book.get("consent", {}).get("confirmed"),
         "storyPath": book.get("storyPath"),
+        "storyReview": story_review_status(project, book),
+        "storyGoal": book.get("storyGoal"),
+        "storyType": book.get("storyType"),
+        "bookStructure": (book.get("settings") or {}).get("bookStructure"),
         "templateSelection": template_selection,
         "assets": {
             asset["id"]: {
@@ -5824,6 +7994,134 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
         },
         "review": book.get("review"),
         "pdf": book.get("pdf"),
+        "finalApproval": book.get("finalApproval"),
+    }
+
+
+def command_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    """Every blocking gate in one call, reported together instead of one at a time.
+
+    The old loop was: run a command, hit one failure, fix it, run again, hit the
+    next. Each cycle costs a full agent round trip. This runs the environment
+    check, the story review, the prompt compile, and the prompt validation in
+    sequence and returns *all* the reasons the book cannot proceed, so the agent
+    fixes them in a single pass.
+
+    Never raises on a gate failure — a failed gate is the answer, not an error.
+    """
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    checks: list[dict[str, Any]] = []
+
+    def run(name: str, fn: Any) -> Any:
+        try:
+            payload = fn()
+        except WorkflowError as exc:
+            checks.append({"id": name, "ok": False, "detail": str(exc)})
+            return None
+        checks.append({"id": name, "ok": True, "detail": None})
+        return payload
+
+    env = command_doctor(argparse.Namespace())
+    checks.append(
+        {
+            "id": "environment",
+            "ok": bool(env.get("installOk")),
+            "detail": None if env.get("installOk") else env.get("nextAction"),
+        }
+    )
+
+    run("story-review-approved", lambda: require_story_review_approved(project, book))
+
+    story_report = None
+    if book.get("storyPath"):
+        checks.append({"id": "story-locked", "ok": True, "detail": None})
+    else:
+        story_path = input_dir(project) / "story.json"
+        if story_path.is_file():
+            story_report = run(
+                "review-story",
+                lambda: command_review_story(
+                    argparse.Namespace(project=project, story=None)
+                ),
+            )
+        else:
+            checks.append(
+                {
+                    "id": "story-locked",
+                    "ok": False,
+                    "detail": f"No story yet — write {story_path} then lock-story",
+                }
+            )
+
+    prompts_ready = all(
+        prompt_file(project, asset).is_file() for asset in book["assets"]
+    )
+    if prompts_ready:
+        run(
+            "compile-prompts",
+            lambda: command_compile_prompts(argparse.Namespace(project=project)),
+        )
+        run(
+            "validate-prompts",
+            lambda: command_validate_prompts(
+                argparse.Namespace(
+                    project=project, min_depth=getattr(args, "min_depth", None)
+                )
+            ),
+        )
+    else:
+        missing = [
+            asset["promptPath"]
+            for asset in book["assets"]
+            if not prompt_file(project, asset).is_file()
+        ]
+        checks.append(
+            {
+                "id": "prompts-written",
+                "ok": False,
+                "detail": f"{len(missing)} prompt file(s) missing: {missing[:4]}",
+            }
+        )
+
+    try:
+        font = str(resolve_arabic_font((book.get("settings") or {})))
+        checks.append({"id": "arabic-font", "ok": True, "detail": font})
+    except TextLayoutError as exc:
+        checks.append({"id": "arabic-font", "ok": False, "detail": str(exc)})
+
+    blocking = [c for c in checks if not c["ok"]]
+    book = load_book(project)
+    return {
+        "mode": "preflight",
+        "ok": not blocking,
+        "checks": checks,
+        "blocking": [c["id"] for c in blocking],
+        "storyReport": story_report,
+        "nextAction": (
+            book.get("nextAction")
+            if not blocking
+            else "Fix every blocking check above in one pass, then rerun preflight"
+        ),
+    }
+
+
+def command_progress(args: argparse.Namespace) -> dict[str, Any]:
+    """Percent complete, current phase, and remaining time for one book.
+
+    Exists as its own command so the agent can answer "خلصنا كام؟" mid-render
+    without touching the project state — every other command attaches the same
+    block, but only after it finishes its own work.
+    """
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    workers = getattr(args, "workers", None) or MAX_CODEX_WORKERS
+    payload = book_progress(book, workers=workers)
+    return {
+        "mode": "progress",
+        "project": str(project),
+        "nextAction": book.get("nextAction"),
+        "progress": payload,
     }
 
 
@@ -5832,20 +8130,17 @@ def skill_scripts_dir() -> Path:
 
 
 def resolve_codex_dispatch() -> Path:
-    """Locate codex-imagegen dispatch.py (personal skill or repo symlink)."""
-    repo_root = skill_scripts_dir().parents[1]  # tools/scripts → hekaytyworkflow
-    candidates = [
-        Path.home() / ".cursor" / "skills" / "codex-imagegen" / "scripts" / "dispatch.py",
-        repo_root
+    """Locate the user-installed codex-imagegen dispatch without repo symlinks."""
+    path = (
+        Path.home()
         / ".cursor"
         / "skills"
         / "codex-imagegen"
         / "scripts"
-        / "dispatch.py",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path.resolve()
+        / "dispatch.py"
+    )
+    if path.is_file():
+        return path.resolve()
     raise WorkflowError(
         "codex-imagegen dispatch.py not found. Expected at "
         "~/.cursor/skills/codex-imagegen/scripts/dispatch.py"
@@ -6042,19 +8337,52 @@ def _generate_batch_locked(args: argparse.Namespace, project: Path) -> dict[str,
 
     timeout = getattr(args, "timeout_sec", None)
     workers = getattr(args, "workers", None)
+    orientation = book_orientation(book)
     payload = run_codex_imagegen(
         project=project,
         jobs=jobs,
         timeout_sec=timeout,
         workers=workers,
-        orientation=book_orientation(book),
+        orientation=orientation,
     )
 
-    reconciled: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
     by_id = {
         r.get("id"): r for r in (payload.get("results") or []) if isinstance(r, dict)
     }
+
+    # Retry the stragglers in-process. A single flaked page used to end the whole
+    # wave and hand the agent a fix-one-page task — a full round trip, plus the
+    # model re-reading the project, to redo work the pool could have absorbed
+    # immediately. Retries are narrow: only jobs with no usable output, and only
+    # as many rounds as --retries allows.
+    raw_retries = getattr(args, "retries", None)
+    retries = DEFAULT_WAVE_RETRIES if raw_retries is None else int(raw_retries)
+    retried: list[str] = []
+    for _ in range(max(0, retries)):
+        stragglers = [
+            job
+            for job in jobs
+            if not (by_id.get(job["id"]) or {}).get("ok")
+            or not Path((by_id.get(job["id"]) or {}).get("path") or job["output"]).is_file()
+        ]
+        if not stragglers:
+            break
+        retried.extend(job["id"] for job in stragglers)
+        for job in stragglers:
+            Path(job["output"]).unlink(missing_ok=True)
+        retry_payload = run_codex_imagegen(
+            project=project,
+            jobs=stragglers,
+            timeout_sec=timeout,
+            workers=workers,
+            orientation=orientation,
+        )
+        for row in retry_payload.get("results") or []:
+            if isinstance(row, dict) and row.get("id"):
+                by_id[row["id"]] = row
+
+    reconciled: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
     for job in jobs:
         asset_id = job["id"]
         row = by_id.get(asset_id) or {}
@@ -6093,6 +8421,7 @@ def _generate_batch_locked(args: argparse.Namespace, project: Path) -> dict[str,
         "jobsPath": payload.get("jobsPath"),
         "briefPath": payload.get("briefPath"),
         "reconciled": reconciled,
+        "retried": sorted(set(retried)),
         "failures": failures,
         "nextAction": book.get("nextAction"),
     }
@@ -6182,6 +8511,7 @@ def _generate_pages_parallel_locked(args: argparse.Namespace, project: Path) -> 
         assets=pending,
         timeout_sec=timeout,
         workers=workers,
+        retries=getattr(args, "retries", None),
         _locked=getattr(args, "_locked", False),
     )
     result = command_generate_batch(batch_args)
@@ -6218,8 +8548,7 @@ def _generate_pages_parallel_locked(args: argparse.Namespace, project: Path) -> 
 def command_generate_book_images(args: argparse.Namespace) -> dict[str, Any]:
     """Prompts folder ready → character-sheet → (accept) → all PDF pages parallel.
 
-    Default pauses after character-sheet for visual accept.
-    Pass --auto-accept-character to continue without pause.
+    Always pauses after the character sheet for a real visual decision.
     """
     project = require_absolute(args.project, "project")
     with ProjectLock(project, "generate-book-images"):
@@ -6229,7 +8558,6 @@ def command_generate_book_images(args: argparse.Namespace) -> dict[str, Any]:
 def _generate_book_images_locked(args: argparse.Namespace, project: Path) -> dict[str, Any]:
     timeout = getattr(args, "timeout_sec", None)
     workers = getattr(args, "workers", None)
-    auto_accept = bool(getattr(args, "auto_accept_character", False))
 
     # Ensure prompts validated / status ready
     book = load_book(project)
@@ -6247,7 +8575,53 @@ def _generate_book_images_locked(args: argparse.Namespace, project: Path) -> dic
     sheet = asset_by_id(book, "character-sheet")
     steps: dict[str, Any] = {"validated": True}
 
-    # Step A: character-sheet image
+    # Step A: character sheet AND every location sheet in ONE dispatch.
+    #
+    # They used to be two waves separated by the human accept pause, which cost
+    # a full round trip plus however long the family took to look at the sheet —
+    # while five of six render lanes sat idle. Location sheets contain no people,
+    # so nothing about them depends on the sheet being approved: if the sheet is
+    # rejected, only the sheet is redrawn and the places are still good.
+    pending_locations = [
+        asset_id
+        for asset_id in location_asset_ids(book)
+        if not asset_by_id(book, asset_id).get("imagePath")
+    ]
+    wave_one = [
+        *([] if sheet.get("imagePath") or sheet["status"] == "accepted" else ["character-sheet"]),
+        *pending_locations,
+    ]
+    if wave_one:
+        steps["sheetsWave"] = command_generate_batch(
+            argparse.Namespace(
+                project=project,
+                assets=wave_one,
+                timeout_sec=timeout,
+                workers=workers,
+                retries=getattr(args, "retries", None),
+                _locked=True,
+            )
+        )
+        book = load_book(project)
+        sheet = asset_by_id(book, "character-sheet")
+        failed_locations = [
+            row["id"]
+            for row in (steps["sheetsWave"].get("failures") or [])
+            if isinstance(row, dict) and str(row.get("id", "")).startswith("location-sheet-")
+        ]
+        if failed_locations:
+            return {
+                "ok": False,
+                "mode": "generate-book-images",
+                "paused": False,
+                "reason": "location_sheet_failed",
+                "steps": steps,
+                "nextAction": (
+                    f"Fix the failed location-sheet prompt(s) ({', '.join(failed_locations)}) "
+                    "and rerun generate-book-images. Pages cannot start without them."
+                ),
+            }
+
     if sheet["status"] != "accepted":
         needs_gen = sheet["status"] in {
             "prompted",
@@ -6288,44 +8662,38 @@ def _generate_book_images_locked(args: argparse.Namespace, project: Path) -> dic
         )
 
         if sheet["status"] != "accepted":
-            if auto_accept:
-                accept = command_character_review(
-                    argparse.Namespace(project=project, accept=True, review=None)
-                )
-                steps["characterAccept"] = accept
-                book = load_book(project)
-                sheet = asset_by_id(book, "character-sheet")
-            else:
-                book["nextAction"] = (
-                    "Review character sheet image; if ok run: "
-                    f"character-review --accept, then generate-book-images again "
-                    f"(or pass --auto-accept-character). Image: {image_abs}"
-                )
-                save_book(project, book)
-                return {
-                    "ok": True,
-                    "mode": "generate-book-images",
-                    "paused": True,
-                    "reason": "character_sheet_awaiting_accept",
-                    "characterSheetImage": image_abs,
-                    "steps": steps,
-                    "nextAction": book["nextAction"],
-                }
+            book["nextAction"] = (
+                "Review character sheet image; if ok run character-review --accept, "
+                f"then generate-book-images again. Image: {image_abs}"
+            )
+            save_book(project, book)
+            return {
+                "ok": True,
+                "mode": "generate-book-images",
+                "paused": True,
+                "reason": "character_sheet_awaiting_accept",
+                "characterSheetImage": image_abs,
+                "steps": steps,
+                "nextAction": book["nextAction"],
+            }
 
-    # Step B: location sheets — one parallel dispatch, before any story page.
+    # Step B: catch any location sheet that is still missing — a rerun after a
+    # rejected character sheet, or a prompt the family fixed between runs. The
+    # common path renders zero here because wave A already covered them.
     book = load_book(project)
-    pending_locations = [
+    leftover_locations = [
         asset_id
         for asset_id in location_asset_ids(book)
         if not asset_by_id(book, asset_id).get("imagePath")
     ]
-    if pending_locations:
+    if leftover_locations:
         steps["locationSheets"] = command_generate_batch(
             argparse.Namespace(
                 project=project,
-                assets=pending_locations,
+                assets=leftover_locations,
                 timeout_sec=timeout,
                 workers=workers,
+                retries=getattr(args, "retries", None),
                 _locked=True,
             )
         )
@@ -6398,6 +8766,8 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
         ("pillow", "PIL"),
         ("reportlab", "reportlab"),
         ("pypdf", "pypdf"),
+        ("arabic-reshaper", "arabic_reshaper"),
+        ("python-bidi", "bidi"),
     ):
         result = _check_python_pkg(import_name)
         checks.append(
@@ -6408,6 +8778,22 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
                 "fix": None
                 if result["ok"]
                 else f"python3 -m pip install -r tools/requirements.txt",
+            }
+        )
+
+    for tool_id, executable, fix in (
+        ("qpdf", "qpdf", "Install qpdf (macOS: brew install qpdf)"),
+        ("pdftoppm", "pdftoppm", "Install Poppler (macOS: brew install poppler)"),
+        ("pdfinfo", "pdfinfo", "Install Poppler (macOS: brew install poppler)"),
+        ("pdffonts", "pdffonts", "Install Poppler (macOS: brew install poppler)"),
+    ):
+        path = shutil.which(executable)
+        checks.append(
+            {
+                "id": tool_id,
+                "ok": bool(path),
+                "detail": path or "not on PATH",
+                "fix": None if path else fix,
             }
         )
 
@@ -6461,7 +8847,7 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
             "detail": dispatch_path,
             "fix": None
             if dispatch_ok
-            else "Restore .cursor/skills/codex-imagegen or ~/.cursor/skills/codex-imagegen",
+            else "Install codex-imagegen under ~/.cursor/skills/codex-imagegen",
         }
     )
 
@@ -6505,6 +8891,286 @@ def command_setup(args: argparse.Namespace) -> dict[str, Any]:
         "setupExitCode": proc.returncode,
         "doctor": doctor,
         "nextAction": doctor.get("nextAction"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# handoff doctrine — source of truth commands
+# ---------------------------------------------------------------------------
+
+
+def command_show_doctrine(args: argparse.Namespace) -> dict[str, Any]:
+    """Print the rulebook, or one section of it."""
+    section = getattr(args, "section", None)
+    payload = doctrine.load_doctrine(refresh=True)
+    if section:
+        return {
+            "mode": "show-doctrine",
+            "section": section,
+            "source": str(doctrine.DOCTRINE_PATH),
+            "doctrineVersion": payload["doctrineVersion"],
+            "value": doctrine.doctrine_section(section),
+        }
+    return {
+        "mode": "show-doctrine",
+        "source": str(doctrine.DOCTRINE_PATH),
+        "handoff": str(doctrine.HANDOFF_PATH),
+        "doctrineVersion": payload["doctrineVersion"],
+        "sections": sorted(
+            key for key, value in payload.items() if isinstance(value, (dict, list))
+        ),
+        "bookStructure": doctrine.structure_slots(doctrine.doctrine_pdf_page_count()),
+        "storyTypes": {
+            key: value["labelAr"] for key, value in doctrine.story_types().items()
+        },
+        "checklist": doctrine.checklist(),
+    }
+
+
+def command_check_doctrine(args: argparse.Namespace) -> dict[str, Any]:
+    """Run only the handoff rules against a story, without the age/arc report."""
+    project = require_absolute(args.project, "project")
+    source = (
+        require_absolute(args.story, "story")
+        if getattr(args, "story", None)
+        else input_dir(project) / "story.json"
+    )
+    payload = read_json(source)
+    pages = payload.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise WorkflowError("story.json needs pages[] before the doctrine check")
+    errors = [
+        *doctrine.doctrine_errors(payload, pages),
+        *doctrine.gap_page_errors(pages),
+    ]
+    warnings = doctrine.doctrine_warnings(payload, pages)
+    return {
+        "mode": "check-doctrine",
+        "story": str(source),
+        "doctrineVersion": doctrine.load_doctrine()["doctrineVersion"],
+        "decision": "pass" if not errors else "revise",
+        "storyType": payload.get("storyType"),
+        "bookStructure": payload.get("bookStructure") or BOOK_STRUCTURE_ID,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def command_set_story_type(args: argparse.Namespace) -> dict[str, Any]:
+    """Record the handoff §5 type (A/B/C) across brief, story, and book."""
+    project = require_absolute(args.project, "project")
+    entry = doctrine.story_type(args.type)
+    book = load_book(project)
+    brief_path = input_dir(project) / "brief.json"
+    brief = read_json(brief_path)
+
+    goal = brief.get("storyGoal")
+    if isinstance(goal, dict) and goal.get("mode") not in (None, "", entry["storyGoalMode"]):
+        raise WorkflowError(
+            f"Type {entry['id']} ({entry['labelAr']}) is a {entry['storyGoalMode']} book, "
+            f"but storyGoal.mode is {goal.get('mode')!r}. Fix one of them with "
+            "set-story-goal before continuing."
+        )
+
+    brief["storyType"] = entry["id"]
+    atomic_json(brief_path, brief)
+    book["storyType"] = entry["id"]
+
+    story_path = input_dir(project) / "story.json"
+    story_updated = False
+    if story_path.exists():
+        if book.get("storyPath"):
+            raise WorkflowError("Story is already locked; storyType cannot change")
+        story = read_json(story_path)
+        story["storyType"] = entry["id"]
+        atomic_json(story_path, story)
+        story_updated = True
+    save_book(project, book)
+    return {
+        "mode": "set-story-type",
+        "storyType": entry["id"],
+        "labelAr": entry["labelAr"],
+        "storyGoalMode": entry["storyGoalMode"],
+        "requires": entry.get("requires") or [],
+        "storyUpdated": story_updated,
+        "nextAction": (
+            f"Type {entry['id']} recorded. "
+            + (
+                "Now list matching templates or start the custom interview."
+                if isinstance(goal, dict) and goal.get("mode")
+                else "Set the goal first: set-story-goal --mode "
+                f"{entry['storyGoalMode']} --goal \"…\"."
+            )
+        ),
+    }
+
+
+def command_apply_fixed_pages(args: argparse.Namespace) -> dict[str, Any]:
+    """Write the doctrine-owned dedication, «قصص تانية», and back-cover copy."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    if book.get("storyPath"):
+        raise WorkflowError("Story is already locked; unlock before rewriting fixed pages")
+    story_path = input_dir(project) / "story.json"
+    story = read_json(story_path)
+    pages = story.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise WorkflowError("story.json needs pages[] before fixed pages can be written")
+
+    hero = ""
+    for persona in story.get("personas") or []:
+        if isinstance(persona, dict) and persona.get("role") == "hero":
+            hero = str(persona.get("displayName") or "").strip()
+            break
+    if not hero:
+        raise WorkflowError(
+            "The dedication needs the hero's Arabic display name in story.personas"
+        )
+
+    roles = doctrine.structure_slot_roles(len(pages))
+    cover_location = str(
+        next(
+            (page.get("locationId") for page in pages if isinstance(page, dict) and page.get("id") == "cover"),
+            "",
+        )
+        or ""
+    )
+    updated: list[str] = []
+    for index, page in enumerate(pages):
+        if not isinstance(page, dict):
+            continue
+        page_id = str(page.get("id") or "")
+        role = roles.get(page_id)
+        location = str(page.get("locationId") or "") or cover_location
+        if role == "dedication":
+            pages[index] = {**page, **doctrine.dedication_page(hero, location)}
+            updated.append(page_id)
+        elif role == "other-stories":
+            pages[index] = {**page, **doctrine.other_stories_page(page_id, location)}
+            updated.append(page_id)
+        elif role == "back-cover":
+            pages[index] = {
+                **page,
+                "role": "back-cover",
+                "text": doctrine.back_cover_text(),
+                "fixedByDoctrine": True,
+            }
+            updated.append(page_id)
+
+    story["bookStructure"] = BOOK_STRUCTURE_ID
+    atomic_json(story_path, story)
+    return {
+        "mode": "apply-fixed-pages",
+        "story": str(story_path),
+        "hero": hero,
+        "updatedPages": updated,
+        "backCoverIcons": doctrine.back_cover_icons(),
+        "nextAction": "Run check-doctrine, then review-story.",
+    }
+
+
+def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
+    """Emit self-contained ChatGPT instructions for the manual image lane."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    story_path = input_dir(project) / "story.json"
+    story = read_json(story_path) if story_path.exists() else {}
+    story_text = {
+        str(page.get("id")): str(page.get("text") or "")
+        for page in story.get("pages") or []
+        if isinstance(page, dict)
+    }
+    page_count = int((book.get("settings") or {}).get("pdfPageCount") or DEFAULT_PDF_PAGES)
+
+    if getattr(args, "all", False):
+        asset_ids = [
+            asset_id
+            for asset_id in pdf_ids(book)
+            if not doctrine.is_fixed_page(asset_id, page_count)
+        ]
+    else:
+        asset_ids = list(getattr(args, "asset", None) or [])
+    if not asset_ids:
+        raise WorkflowError("Pass --asset ID (repeatable) or --all")
+    for asset_id in asset_ids:
+        require_asset_id(book, asset_id)
+
+    sheet = asset_by_id(book, "character-sheet")
+    sheet_path = str(sheet.get("imagePath") or "") or None
+
+    blocks: list[dict[str, str]] = []
+    for index, asset_id in enumerate(asset_ids):
+        asset = asset_by_id(book, asset_id)
+        prompt_path = prompt_file(project, asset)
+        if not prompt_path.exists():
+            raise WorkflowError(
+                f"No prompt JSON for {asset_id}: {prompt_path}. Write the prompt first."
+            )
+        payload = read_json(prompt_path)
+        next_id = asset_ids[index + 1] if index + 1 < len(asset_ids) else None
+        if asset_id == "character-sheet":
+            instruction = manual_dispatch.render_character_sheet_instruction(payload)
+        else:
+            instruction = manual_dispatch.render_manual_instruction(
+                payload,
+                asset_id=asset_id,
+                page_text=story_text.get(asset_id),
+                page_role=doctrine.page_role(asset_id, page_count),
+                character_sheet_path=sheet_path,
+                next_asset_id=next_id,
+            )
+        blocks.append({"assetId": asset_id, "instruction": instruction})
+
+    out_dir = getattr(args, "out", None)
+    written: list[str] = []
+    per_file = int(doctrine.load_doctrine()["imageTool"]["maxPagesPerFile"])
+    if out_dir:
+        destination = require_absolute(Path(out_dir), "out")
+        destination.mkdir(parents=True, exist_ok=True)
+        for start in range(0, len(blocks), per_file):
+            chunk = blocks[start : start + per_file]
+            name = "-".join(block["assetId"] for block in chunk)
+            path = destination / f"{name}.md"
+            atomic_text(path, manual_dispatch.render_batch_file(chunk))
+            written.append(str(path))
+
+    return {
+        "mode": "manual-dispatch",
+        "assets": asset_ids,
+        "maxPagesPerMessage": int(
+            doctrine.load_doctrine()["imageTool"]["maxPagesPerMessage"]
+        ),
+        "maxPagesPerFile": per_file,
+        "characterSheet": sheet_path,
+        "files": written,
+        "blocks": blocks if not written else [{"assetId": b["assetId"]} for b in blocks],
+        "nextAction": (
+            "Paste one block per message. Generate one page, wait for the reply, "
+            "then send the next."
+        ),
+    }
+
+
+def command_init_vault(args: argparse.Namespace) -> dict[str, Any]:
+    """Make an existing client project openable as an Obsidian vault."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project) if manifest_path(project).exists() else None
+    result = obsidian_vault.scaffold_client_vault(project, book)
+    return {"mode": "init-vault", **result}
+
+
+def command_build_vault(args: argparse.Namespace) -> dict[str, Any]:
+    """Regenerate the studio vault in this repository from the doctrine."""
+    repo_root = (
+        require_absolute(args.root, "root")
+        if getattr(args, "root", None)
+        else tools_root().parent
+    )
+    result = obsidian_vault.build_studio_vault(repo_root)
+    return {
+        "mode": "build-vault",
+        "doctrineVersion": doctrine.load_doctrine()["doctrineVersion"],
+        **result,
     }
 
 
@@ -6552,6 +9218,23 @@ def parser() -> argparse.ArgumentParser:
     p_pages.add_argument("--pages", type=int, required=True)
     p_pages.set_defaults(func=command_set_pages)
 
+    p_goal = sub.add_parser(
+        "set-story-goal",
+        help="Choose educational vs entertainment before selecting/writing a story",
+    )
+    add_project(p_goal)
+    p_goal.add_argument(
+        "--mode",
+        required=True,
+        choices=sorted(STORY_INTENTS),
+    )
+    p_goal.add_argument(
+        "--goal",
+        required=True,
+        help="Arabic sentence stating the behaviour/value or fun fantasy promise",
+    )
+    p_goal.set_defaults(func=command_set_story_goal)
+
     p_consent = sub.add_parser("confirm-consent")
     add_project(p_consent)
     p_consent.add_argument("--statement", required=True)
@@ -6584,7 +9267,7 @@ def parser() -> argparse.ArgumentParser:
     p_theme.add_argument(
         "--theme",
         required=True,
-        help="Theme id from themes/catalog.json (storybook|cartoony|fairytale-glow|feature-cgi|enchanted-glow|wonder-trail)",
+        help="Theme id from the live themes/catalog.json (run list-themes)",
     )
     p_theme.set_defaults(func=command_apply_theme)
 
@@ -6607,6 +9290,16 @@ def parser() -> argparse.ArgumentParser:
     p_templates.add_argument(
         "--category",
         help="Optional exact category filter",
+    )
+    p_templates.add_argument(
+        "--intent",
+        choices=sorted(STORY_INTENTS),
+        help="Show only educational or entertainment templates",
+    )
+    p_templates.add_argument(
+        "--include-drafts",
+        action="store_true",
+        help="Audit only: include templates blocked as needs-revision",
     )
     p_templates.set_defaults(func=command_list_templates)
 
@@ -6697,6 +9390,49 @@ def parser() -> argparse.ArgumentParser:
     )
     p_story_review.set_defaults(func=command_review_story)
 
+    p_prepare_story_review = sub.add_parser(
+        "prepare-story-review",
+        help="Validate story.json, write input/story-review.md, then stop for the user",
+    )
+    add_project(p_prepare_story_review)
+    p_prepare_story_review.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing review file after intentionally inspecting it",
+    )
+    p_prepare_story_review.set_defaults(func=command_prepare_story_review)
+
+    p_story_review_status = sub.add_parser(
+        "story-review-status",
+        help="Report whether story-review.md is awaiting edits, changed, approved, or stale",
+    )
+    add_project(p_story_review_status)
+    p_story_review_status.set_defaults(func=command_story_review_status)
+
+    p_approve_story_review = sub.add_parser(
+        "approve-story-review",
+        help="Sync the user's reviewed Markdown back to story.json and bind its hashes",
+    )
+    add_project(p_approve_story_review)
+    p_approve_story_review.add_argument(
+        "--statement",
+        required=True,
+        help="The user's explicit review-complete statement",
+    )
+    p_approve_story_review.set_defaults(func=command_approve_story_review)
+
+    p_reopen_story_review = sub.add_parser(
+        "reopen-story-review",
+        help="Reopen a locked story and invalidate every dependent prompt/image/PDF",
+    )
+    add_project(p_reopen_story_review)
+    p_reopen_story_review.add_argument(
+        "--statement",
+        required=True,
+        help="User/editor statement explaining why the locked story is being revised",
+    )
+    p_reopen_story_review.set_defaults(func=command_reopen_story_review)
+
     p_compile = sub.add_parser(
         "compile-prompts",
         help="Rebuild compiledPrompt in every prompt JSON from its structured fields",
@@ -6706,7 +9442,25 @@ def parser() -> argparse.ArgumentParser:
 
     p_validate = sub.add_parser("validate-prompts")
     add_project(p_validate)
+    p_validate.add_argument(
+        "--min-depth",
+        type=int,
+        default=None,
+        help=(
+            "Prompt depth score every prompt must reach "
+            f"(default {promptdepth.DEFAULT_MIN_SCORE} for pages, "
+            f"{promptdepth.SHEET_MIN_SCORE} for sheets)"
+        ),
+    )
     p_validate.set_defaults(func=command_validate_prompts)
+
+    p_preflight = sub.add_parser(
+        "preflight",
+        help="Run every deterministic gate at once and report one verdict",
+    )
+    add_project(p_preflight)
+    p_preflight.add_argument("--min-depth", type=int, default=None)
+    p_preflight.set_defaults(func=command_preflight)
 
     p_begin = sub.add_parser("begin-asset")
     add_project(p_begin)
@@ -6744,9 +9498,120 @@ def parser() -> argparse.ArgumentParser:
     p_merge.add_argument("--review", action="append", required=True, type=Path)
     p_merge.set_defaults(func=command_merge_reviews)
 
+    p_manual = sub.add_parser(
+        "resolve-manual-review",
+        help="Resolve an attempt-limit review item by explicit accept or replacement image",
+    )
+    add_project(p_manual)
+    p_manual.add_argument("--asset", required=True)
+    choice = p_manual.add_mutually_exclusive_group(required=True)
+    choice.add_argument(
+        "--accept",
+        action="store_true",
+        help="Explicitly accept the current image despite the recorded issue",
+    )
+    choice.add_argument(
+        "--image",
+        type=Path,
+        help="Absolute path to a manually corrected replacement image",
+    )
+    p_manual.add_argument(
+        "--statement",
+        required=True,
+        help="User/editor statement explaining the manual resolution",
+    )
+    p_manual.set_defaults(func=command_resolve_manual_review)
+
+    p_approve_final = sub.add_parser(
+        "approve-final",
+        help="Bind the user's explicit approval to the exact verified draft",
+    )
+    add_project(p_approve_final)
+    p_approve_final.add_argument(
+        "--statement",
+        required=True,
+        help="The user's explicit final-PDF approval statement",
+    )
+    p_approve_final.set_defaults(func=command_approve_final)
+
+    p_doctrine = sub.add_parser(
+        "show-doctrine", help="Print the handoff rulebook (or one section)"
+    )
+    p_doctrine.add_argument(
+        "--section",
+        default=None,
+        help="bookStructure | storyTypes | literalLanguage | printSafeColor | imageTool | …",
+    )
+    p_doctrine.set_defaults(func=command_show_doctrine)
+
+    p_check_doctrine = sub.add_parser(
+        "check-doctrine", help="Run only the handoff rules against a story"
+    )
+    add_project(p_check_doctrine)
+    p_check_doctrine.add_argument("--story", type=Path, default=None)
+    p_check_doctrine.set_defaults(func=command_check_doctrine)
+
+    p_story_type = sub.add_parser(
+        "set-story-type", help="Record the handoff §5 story type (A/B/C)"
+    )
+    add_project(p_story_type)
+    p_story_type.add_argument("--type", required=True, choices=["A", "B", "C"])
+    p_story_type.set_defaults(func=command_set_story_type)
+
+    p_fixed = sub.add_parser(
+        "apply-fixed-pages",
+        help="Write the dedication, «قصص تانية», and back-cover copy from the doctrine",
+    )
+    add_project(p_fixed)
+    p_fixed.set_defaults(func=command_apply_fixed_pages)
+
+    p_manual = sub.add_parser(
+        "manual-dispatch",
+        help="Self-contained ChatGPT instructions for the manual image lane",
+    )
+    add_project(p_manual)
+    p_manual.add_argument(
+        "--asset",
+        action="append",
+        default=None,
+        help="Asset id (repeatable), e.g. --asset page-05 --asset page-06",
+    )
+    p_manual.add_argument(
+        "--all", action="store_true", help="Every generatable PDF asset in order"
+    )
+    p_manual.add_argument(
+        "--out", type=Path, default=None, help="Directory to write batch Markdown files"
+    )
+    p_manual.set_defaults(func=command_manual_dispatch)
+
+    p_init_vault = sub.add_parser(
+        "init-vault", help="Make a client project openable as an Obsidian vault"
+    )
+    add_project(p_init_vault)
+    p_init_vault.set_defaults(func=command_init_vault)
+
+    p_build_vault = sub.add_parser(
+        "build-vault", help="Regenerate the studio Obsidian vault from the doctrine"
+    )
+    p_build_vault.add_argument("--root", type=Path, default=None)
+    p_build_vault.set_defaults(func=command_build_vault)
+
     p_status = sub.add_parser("status")
     add_project(p_status)
     p_status.set_defaults(func=command_status)
+
+    p_progress = sub.add_parser(
+        "progress",
+        help="Percent complete, current phase, and estimated time left",
+    )
+    add_project(p_progress)
+    p_progress.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Assumed parallel lanes for the ETA (default matches the renderer)",
+    )
+    p_progress.set_defaults(func=command_progress)
 
     def add_codex_args(p: argparse.ArgumentParser) -> None:
         p.add_argument(
@@ -6759,7 +9624,16 @@ def parser() -> argparse.ArgumentParser:
             "--workers",
             type=int,
             default=None,
-            help="Parallel Codex sessions (default min(jobs, 20))",
+            help=f"Parallel Codex sessions (default min(jobs, {MAX_CODEX_WORKERS}))",
+        )
+        p.add_argument(
+            "--retries",
+            type=int,
+            default=None,
+            help=(
+                "In-wave retries for jobs that came back empty "
+                f"(default {DEFAULT_WAVE_RETRIES}). 0 disables."
+            ),
         )
 
     p_gen = sub.add_parser(
@@ -6792,27 +9666,49 @@ def parser() -> argparse.ArgumentParser:
         "generate-book-images",
         help=(
             "From prompts folder: character-sheet first, then all PDF pages "
-            "(parallel Codex). Pauses for character accept unless "
-            "--auto-accept-character."
+            "(parallel Codex). Always pauses for character acceptance."
         ),
     )
     add_project(p_book_images)
     add_codex_args(p_book_images)
-    p_book_images.add_argument(
-        "--auto-accept-character",
-        action="store_true",
-        help="Accept character-sheet automatically and continue to all pages",
-    )
     p_book_images.set_defaults(func=command_generate_book_images)
 
     return root
+
+
+def attach_progress(args: argparse.Namespace, result: dict[str, Any]) -> dict[str, Any]:
+    """Add the completion block to any command that ran against a real project.
+
+    Done once here rather than in 36 command bodies: every command already ends
+    by saving book.json, so the manifest on disk is the truth at this point. A
+    command that never touched a project (list-themes, doctor) simply has no
+    progress to report, and a manifest that cannot be read must never turn a
+    successful command into a failure.
+    """
+    if "progress" in result:
+        return result
+    project = getattr(args, "project", None)
+    if not isinstance(project, Path):
+        return result
+    try:
+        book = load_book(require_absolute(project, "project"))
+    except (WorkflowError, OSError):
+        return result
+    workers = getattr(args, "workers", None) or MAX_CODEX_WORKERS
+    return {**result, "progress": book_progress(book, workers=workers)}
 
 
 def main() -> None:
     args = parser().parse_args()
     try:
         result = args.func(args)
-    except WorkflowError as exc:
+        result = attach_progress(args, result)
+    except (
+        WorkflowError,
+        doctrine.DoctrineError,
+        obsidian_vault.VaultError,
+        manual_dispatch.ManualDispatchError,
+    ) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         sys.exit(1)
     print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))

@@ -2,3 +2,9 @@
 pillow>=10.0.0
 reportlab>=4.0.0
 pypdf>=4.0.0
+
+# Editable text layer: illustrations arrive text-free and the Arabic is drawn as
+# a real PDF text stream. ReportLab does no Arabic shaping or bidi of its own,
+# so both packages are required to build a book.
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2

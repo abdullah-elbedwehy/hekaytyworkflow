@@ -1,6 +1,31 @@
-# Local junk for hekaytyworkflow tools
+# Secrets and local machine state
 **/.env
+**/.env.*
+!**/.env.example
 **/*.key
+**/*.pem
 .DS_Store
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
 **/__pycache__/
-*.pyc
+*.py[cod]
+
+# Client/private artifacts never belong in the workflow repository.
+**/personas/
+**/input/
+**/output/
+**/clients/
+
+# The Codex image skill is installed per user; never commit an absolute symlink.
+.cursor/skills/codex-imagegen
+
+# Obsidian: the vault config is shared, the per-machine workspace state is not.
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph-state.json
+.trash/
+
+# Copyrighted source material and derived local research stay local.
+tools/.corpus/

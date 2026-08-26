@@ -24,6 +24,10 @@ Chosen deliberately. A book that chases three habits at once stops being a story
 and becomes a lecture, and the child recognises the lecture. The extra habits the
 family mentions are kept — they just do not get an arc.
 
+A habit always selects the `educational` story branch. If the book is already
+set to `entertainment`, `set-personalization` rejects `habitFocus` instead of
+silently turning a fun adventure into a corrective lesson.
+
 `targetBehaviorAr` is required and must be a real replacement behaviour. "يبطل
 قضم ضوافره" is not drawable; "يمسك كورة الإسفنج ويعد لتلاتة" is a beat an
 illustrator can put on a page.
@@ -102,6 +106,9 @@ Enforced by `lock-story`:
 - The habit's persona is a participant on every arc page.
 - The cover is not an arc page: it promises the adventure, it does not work.
 - At least 4 distinct pages total, so the change is earned rather than announced.
+- The exact `targetBehaviorAr` is visible in `text`, `beat`, or `action` on at
+  least one `turn` page and at least one later `reinforce` page. Arc metadata
+  alone is not proof.
 
 ### `requestCoverage` — required for every `required` request
 

@@ -1,0 +1,542 @@
+{
+  "schemaVersion": 1,
+  "doctrineVersion": "2026-08-26",
+  "sourceDocument": "tools/references/handoff.md",
+  "owner": "عمر",
+  "audience": "عائلات مصرية محافظة",
+  "precedence": [
+    "handoff.md is the single source of truth for this business.",
+    "Section 2 (literal-language rules) outranks every other rule in this file.",
+    "Any rule here may only be changed by an explicit written instruction from the owner."
+  ],
+  "responseStyle": {
+    "storyTextLanguage": "natural Egyptian Arabic",
+    "chatLanguage": "match the owner's language (Arabic or English)",
+    "rules": [
+      "لا تطلع أي برومبت صورة أو تصميم قبل ما نص القصة الكامل يتقفل ويتوافق عليه صراحة.",
+      "الترتيب: اسم الطفل + الفكرة → نص القصة كامل → مراجعة وتعديل → موافقة صريحة → البرومبتات.",
+      "لا تفترض تقسيم لقطات متعددة (Shot A/B) لأي صفحة من غير تأكيد صريح.",
+      "لا ترسل أكتر من صفحة صور في نفس الرسالة."
+    ]
+  },
+  "literalLanguage": {
+    "priority": "highest",
+    "rules": [
+      {
+        "id": "L1",
+        "ruleAr": "ممنوع وصف المشاعر الداخلية بمجاز أدبي.",
+        "bannedExamplesAr": [
+          "حد سرق مكانه",
+          "قلبه بقى أكبر",
+          "الحب مش زي الحلوى",
+          "التقيلة في صدره خفت"
+        ]
+      },
+      {
+        "id": "L2",
+        "ruleAr": "المشاعر تتقال مباشرة وبسيطة زي ما الطفل بيفكر فعلاً.",
+        "goodExampleAr": "حد أخد مكانه وحب بابا وماما منه"
+      },
+      {
+        "id": "L3",
+        "ruleAr": "حل الأزمة العاطفية لازم يحصل من خلال حدث/فعل ملموس (هدية توصل، حضن، لعب سوا) — مش تحول داخلي مجرد."
+      },
+      {
+        "id": "L4",
+        "ruleAr": "كلام الطمأنة من الأهل/الرفيق لازم يبقى مباشر ودافئ وحرفي — ممنوع حكمة ذكية أو قول مأثور."
+      }
+    ],
+    "metaphorPatterns": [
+      {
+        "id": "MP-steal-place",
+        "pattern": "(سرق|سرقت|سرقوا|سارق)\\s+\\S{0,6}?(مكانه|مكانها|مكاني|مكانك)",
+        "messageAr": "«سرق مكانه» مجاز عن شعور داخلي — قول اللي حصل فعلاً بدل الصورة الأدبية.",
+        "severity": "high",
+        "exceptionAr": "«أخد مكانه» مسموح — هو المثال الصح في handoff §2 L2."
+      },
+      {
+        "id": "MP-heart-grew",
+        "pattern": "(قلبه|قلبها|قلبي|قلبنا|قلبك)\\s+(بقى|بقت|كبر|كبرت|اتوسع|اتوسعت|صغر)",
+        "messageAr": "تكبير/تصغير القلب مجاز — استبدله بفعل ملموس أو بجملة مشاعر مباشرة.",
+        "severity": "high"
+      },
+      {
+        "id": "MP-heavy-chest",
+        "pattern": "(التقيلة|التقالة|الحاجة التقيلة|الحتة التقيلة)\\s+(في|فى)\\s+(صدره|صدرها|صدري)",
+        "messageAr": "«التقيلة في صدره» مجاز جسدي عن الحزن — قول الطفل حاسس بإيه بشكل مباشر.",
+        "severity": "high"
+      },
+      {
+        "id": "MP-love-is-like",
+        "pattern": "(الحب|الغيرة|الخوف|الفرح|الزعل)\\s+(مش\\s+)?زي\\s+(الحلوى|الكيكة|التورتة|الشوكولاتة|الأكل|الشمس|البحر)",
+        "messageAr": "تشبيه المشاعر بحاجة تانية ممنوع — الطمأنة لازم تكون حرفية.",
+        "severity": "high"
+      },
+      {
+        "id": "MP-abstract-actor",
+        "pattern": "(الخوف|الغيرة|الحزن|الزعل|الفرحة|الشجاعة|الوحدة)\\s+(قال|قالت|مشي|مشيت|جري|جريت|هرب|هربت|وقف|وقفت|صحي|صحيت|دخل|دخلت|خرج|خرجت|لعب|لعبت)",
+        "messageAr": "ممنوع تجسيد المفاهيم المجردة كفاعل نحوي — خلي الفاعل شخص أو حاجة ملموسة.",
+        "severity": "high"
+      }
+    ],
+    "wisdomPatterns": [
+      {
+        "id": "WP-proverb-opener",
+        "pattern": "(الدنيا|الحياة|الناس|الكبار)\\s+(دايمًا|دايما|بتبقى|بتكون|علمتنا|بتعلمنا)",
+        "messageAr": "دي حكمة عامة مش كلام طمأنة مباشر — وجّه الكلام للطفل نفسه.",
+        "severity": "medium"
+      },
+      {
+        "id": "WP-lesson-tag",
+        "pattern": "(وبكده عرف|وبكده عرفت|والدرس|المهم في الحكاية|الحكمة إن)",
+        "messageAr": "ممنوع تختم الصفحة بدرس/حكمة مصاغة — خلي الحدث نفسه يقول المعنى.",
+        "severity": "high"
+      }
+    ]
+  },
+  "narrativeStructure": {
+    "rules": [
+      {
+        "id": "N1",
+        "ruleAr": "لازم توضيح لحظة التحول/القرار (رفض → موافقة) بجملة جسر واضحة، خصوصًا قبل صفحات الألعاب."
+      },
+      {
+        "id": "N2",
+        "ruleAr": "الخوف/الغيرة تتقال كخطاب مباشر للشخص المعني نفسه، مش تعميم غامض.",
+        "goodExampleAr": "مش عايزكو تحبوا حد أكتر مني",
+        "badExampleAr": "مش عايز حد يحبها أكتر مني"
+      },
+      {
+        "id": "N3",
+        "ruleAr": "كل صفحة لازم تخدم المشكلة السلوكية المحددة للقصة دي — ممنوع إعادة استخدام مشهد حشو من قصة تانية."
+      },
+      {
+        "id": "N4",
+        "ruleAr": "المكافآت/نقاط التحول لازم تتربط بفعل سابق أثبته البطل فعلاً.",
+        "goodExampleAr": "عشان عرفت إنك بتحبها وبتلعب معاها",
+        "badExampleAr": "عشان إنت أخوها الكبير"
+      },
+      {
+        "id": "N5",
+        "ruleAr": "الرفقاء السحريين لازم يتفاعلوا عاطفيًا مع نمو البطل — مش ديكور سلبي."
+      },
+      {
+        "id": "N6",
+        "ruleAr": "رد فعل الأهل على خوف الطفل لازم يكون تفاوض/وعد حقيقي بمخرج فعلي، والوعد لازم يتحقق قرب نهاية القصة (Setup → Payoff)."
+      },
+      {
+        "id": "N7",
+        "ruleAr": "مكان صفحة اللعبة لازم يتماشى مع منطق حركة الأحداث."
+      },
+      {
+        "id": "N8",
+        "ruleAr": "الأصحاب/الرفقاء يلاحظوا علامة خارجية ملموسة («شكلك زعلانة») — مش يعرفوا المشاعر بالسحر."
+      }
+    ],
+    "unearnedRewardPatterns": [
+      {
+        "id": "UR-role-based",
+        "pattern": "عشان\\s+(إنت|انت|إنتي|انتي)\\s+(أخوها|اخوها|أختها|اختها|أخوه|اخوه|أخته|اخته|الكبير|الكبيرة|ابن|بنت)",
+        "messageAr": "المكافأة مربوطة بالدور/القرابة مش بفعل أثبته البطل — اربطها بحاجة عملها فعلاً في القصة.",
+        "severity": "high"
+      }
+    ]
+  },
+  "culturalConstraints": {
+    "audienceAr": "عائلة مصرية محافظة",
+    "rules": [
+      {
+        "id": "C1",
+        "ruleAr": "مجموعة الأصدقاء الجانبية لازم تكون من نفس نوع البطل (ولد↔أصحاب ولاد، بنت↔صاحبات بنات).",
+        "enforcement": "sideFriendGenderMustMatchHero"
+      },
+      {
+        "id": "C2",
+        "ruleAr": "تجنب تصوير صداقة/لعب مختلط قريب كأنه شيء عادي متكرر.",
+        "enforcement": "reviewerJudgement"
+      },
+      {
+        "id": "C3",
+        "ruleAr": "تجنب مشاهد مشاركة أكل شخصية — استبدلها بحلوى/كيكة جماعية.",
+        "enforcement": "personalFoodSharingPatterns"
+      }
+    ],
+    "personalFoodSharingPatterns": [
+      {
+        "id": "FS-bite-of",
+        "pattern": "(كل|كلت|كلوا|ياكل|تاكل|خد|خدت|ياخد)\\s+\\S{0,8}?من\\s+(ساندوتش|سندوتش|لقمة|طبق|أكل|اكل|كوباية|إزازة|ازازة)\\s*(صاحبه|صاحبته|زميله|زميلته|صحابه)",
+        "messageAr": "مشاركة أكل شخصية — حوّلها لحلوى/كيكة جماعية اتوزعت على الكل.",
+        "severity": "high"
+      },
+      {
+        "id": "FS-share-sandwich",
+        "pattern": "(قسم|قسمت|شارك|شاركت|نصّ|نص)\\s+\\S{0,8}?(ساندوتش|سندوتش|لقمته|أكله|اكله)\\s*(مع|معا|معاه|معاها)",
+        "messageAr": "مشاركة أكل شخصية — استبدلها بحلوى/كيكة جماعية.",
+        "severity": "high"
+      }
+    ]
+  },
+  "storyTypes": {
+    "A": {
+      "id": "A",
+      "labelAr": "تصحيح سلوك داخلي",
+      "usageAr": "خوف، غيرة، غضب",
+      "storyGoalMode": "educational",
+      "requires": [
+        "رفيق سحري",
+        "تقنية عملية واحدة",
+        "لحظة انتكاسة إلزامية قبل الحل",
+        "مكافأة مستحقة بفعل البطل"
+      ],
+      "requiresMagicalCompanion": true,
+      "requiresRelapseBeat": true,
+      "allowsMagicalCompanion": true
+    },
+    "B": {
+      "id": "B",
+      "labelAr": "تشجيع على مكان",
+      "usageAr": "مدرسة، حضانة، دكتور",
+      "storyGoalMode": "educational",
+      "requires": [
+        "أصدقاء حقيقيون بدون رفيق سحري",
+        "نفس نوع البطل",
+        "بدون مشاهد مشاركة أكل شخصية"
+      ],
+      "requiresMagicalCompanion": false,
+      "requiresRelapseBeat": false,
+      "allowsMagicalCompanion": false
+    },
+    "C": {
+      "id": "C",
+      "labelAr": "مغامرة خيالية",
+      "usageAr": "تسلية ومغامرة",
+      "storyGoalMode": "entertainment",
+      "requires": [
+        "شخصيات أصلية غير مرخصة",
+        "الطفل بطل حقيقي شريك",
+        "سبب اختياره = سبب نجاحه"
+      ],
+      "requiresMagicalCompanion": false,
+      "requiresRelapseBeat": false,
+      "allowsMagicalCompanion": true
+    }
+  },
+  "dialect": {
+    "notesAr": [
+      "«كان» مناسبة لفتح المشهد بس، تتشال في وسط السرد لو مالهاش لازمة.",
+      "«بشويش» للوصف التدريجي، «جامد» كمكثّف فعلي.",
+      "«طب» كأداة ربط حوارية طبيعية.",
+      "سؤال تأكيدي قصير قبل الرد مسموح لواقعية الحوار («قصدك ملك صح؟»).",
+      "اتساق الضمائر مع المخاطَب: خوف موجه لأبوين اتنين → رد بصيغة جمع («قلبنا» مش «قلبي»).",
+      "تكرار «اوي اوي» شغال كويس في جمل المديح/الدفء تحديدًا.",
+      "الرفيق/الصاحب في صفحة اللعبة يشارك فعليًا في اللعب مع البطل، مش بس واقف.",
+      "قص الظروف الحشو («بهدوء»، «شوية» الزيادة) إلا لو فعلاً بتضيف معنى."
+    ],
+    "registerReplacements": [
+      {
+        "term": "أمه",
+        "forms": [
+          "امه",
+          "أمّه",
+          "والدته"
+        ],
+        "useInstead": "ماما",
+        "reason": "handoff §6 — الأسرة بتتسمى ماما/بابا، مش أمه/والده.",
+        "severity": "high"
+      },
+      {
+        "term": "والده",
+        "forms": [
+          "ابوه",
+          "أبوه",
+          "أبيه"
+        ],
+        "useInstead": "بابا",
+        "reason": "handoff §6 — الأسرة بتتسمى ماما/بابا، مش أمه/والده.",
+        "severity": "high"
+      },
+      {
+        "term": "ضحك",
+        "forms": [
+          "ضحكه",
+          "الضحك"
+        ],
+        "useInstead": "ضحكة",
+        "reason": "handoff §6 — «ضحكة» هي الصيغة المصرية المستخدمة في الكتب دي.",
+        "severity": "medium"
+      },
+      {
+        "term": "وهكذا",
+        "useInstead": "بكده",
+        "reason": "handoff §6 — انتقال سردي مصري.",
+        "severity": "high"
+      },
+      {
+        "term": "بهدوء",
+        "useInstead": "شيل الظرف أو استبدله بفعل مرئي",
+        "reason": "handoff §6 — ظرف حشو مالوش لازمة في أغلب الجمل.",
+        "severity": "low"
+      }
+    ]
+  },
+  "bookStructure": {
+    "id": "hekayati-22",
+    "labelAr": "22 صفحة + غلافين منفصلين",
+    "pdfPageCount": 24,
+    "coversAreSeparate": true,
+    "interiorPageCount": 22,
+    "storyPageCount": 20,
+    "slots": [
+      {
+        "assetId": "cover",
+        "role": "cover",
+        "labelAr": "الغلاف الأمامي",
+        "countsTowardInterior": false
+      },
+      {
+        "assetId": "page-01",
+        "role": "dedication",
+        "labelAr": "الإهداء",
+        "countsTowardInterior": true
+      },
+      {
+        "assetId": "page-22",
+        "role": "other-stories",
+        "labelAr": "قصص تانية",
+        "countsTowardInterior": true
+      },
+      {
+        "assetId": "back-cover",
+        "role": "back-cover",
+        "labelAr": "الغلاف الخلفي",
+        "countsTowardInterior": false
+      }
+    ],
+    "storyPageRange": {
+      "firstAssetId": "page-02",
+      "lastAssetId": "page-21"
+    },
+    "mergeRuleAr": "المسودة الأولى غالبًا بتيجي أكتر من 20 صفحة. قبل أي برومبت صور، لازم دمج الأحداث المتقاربة لحد الوصول لـ20 بالظبط، مع الحفاظ الكامل على قواعد القسم 2 و3. الدمج ممكن يبقى هو نفسه الجسر.",
+    "dedicationTemplateAr": "لـ {{hero}} 💛\nالكتاب ده اتعمل عشانك انت بس، من أول صفحة لآخر صفحة.\nإنت البطل الحقيقي فيه، مش بس في القصة، في حياتنا كلها.\nبنحبك اوي اوي يا {{hero}}، وهنفضل نحبك كده لحد ما تكبر.\nبحبك، بابا وماما",
+    "otherStoriesPage": {
+      "rows": 3,
+      "directionAr": "RTL — اسم القصة يمين + صورة غلاف مصغرة شمال",
+      "readingDirection": "rtl"
+    },
+    "backCover": {
+      "marketingCopyAr": "مغامرة اتكتبت خصيصًا لبطل واحد بس في الدنيا كلها... ابنك.\nهنا هو مش بيقرا عن حد تاني، هو بيعيش القصة بنفسه، بوشه هو، وخياله هو اللي بيقود الأحداث من أول صفحة لآخر صفحة.\nفي زمن الشاشات والتابلت، إحنا مؤمنين إن أحلى هدية تقدر تديها لطفلك، هي إنك تفتحله باب جديد لعالم الخيال والقراءة... بشكل هو نفسه بطله.",
+      "icons": [
+        {
+          "emoji": "🎮",
+          "labelAr": "ألعاب تفاعلية"
+        },
+        {
+          "emoji": "🎨",
+          "labelAr": "ألوان مبهجة"
+        },
+        {
+          "emoji": "⭐",
+          "labelAr": "طفلك هو البطل"
+        },
+        {
+          "emoji": "📖",
+          "labelAr": "بداية حب القراءة"
+        },
+        {
+          "emoji": "🎁",
+          "labelAr": "ذكرى بتفضل"
+        }
+      ],
+      "iconRuleAr": "الخمس أيقونات إلزامية، كبيرة وواضحة."
+    }
+  },
+  "imageTool": {
+    "primaryLaneAr": "أداة ChatGPT على الموبايل — يدوية، بدون ذاكرة حالة",
+    "lessons": [
+      {
+        "id": "I1",
+        "ruleAr": "الأداة مالهاش ذاكرة حالة حقيقية — تعليمة واحدة self-contained في كل رسالة."
+      },
+      {
+        "id": "I2",
+        "ruleAr": "النص العربي جوه الصورة غير موثوق — الفن يطلع خالي من أي كتابة، والنص يتحط كطبقة نص حقيقية في الـPDF."
+      },
+      {
+        "id": "I3",
+        "ruleAr": "ارفق الـCharacter Reference Sheet الأصلي المعتمد في كل رسالة توليد صفحة، وقول صراحة متستخدمش أي صورة اتولدت في القصة قبل كده."
+      },
+      {
+        "id": "I4",
+        "ruleAr": "لا تفترض تقسيم لقطات متعددة — الافتراضي: مشهد واحد = صورة واحدة."
+      },
+      {
+        "id": "I5",
+        "ruleAr": "اتجاه الصور: Landscape 16:9 دايمًا إلا لو اتقال غير كده صراحة."
+      },
+      {
+        "id": "I6",
+        "ruleAr": "انسخ الشخصية الكرتونية بالظبط من الـReference Sheet — ممنوع إعادة اشتقاق الوجه من الصورة الحقيقية، وممنوع أي Style Drift. لو فيه تعارض بين الواقعية والمطابقة → المطابقة تكسب."
+      },
+      {
+        "id": "I7",
+        "ruleAr": "إرسال الصفحات على دفعات: صفحتين بحد أقصى في الملف، وتوليد صفحة واحدة بس في كل رد."
+      },
+      {
+        "id": "I8",
+        "ruleAr": "Character Sheets: البطل شيت منفرد 4 زوايا (أمامي، 3/4، جانبي، خلفي). الشخصيات المساندة كلها في شيت واحد مجمّع 4 زوايا. الاتنين يترفقوا مع كل برومبت صفحة."
+      }
+    ],
+    "referenceSheetClauseAr": "استخدم صورة الـ Reference Sheet المرفقة دي بس، متستخدمش أي صورة اتولدت في القصة قبل كده. انسخ الشخصية الكرتونية بالظبط زي ما هي — نفس الستايل، نفس نسب الوجه، نفس حجم وشكل العين، نفس شكل الأنف والفم، نفس درجة لون الجلد والشعر زي ما هي في صورة الكرتون نفسها.",
+    "arabicTextClauseEn": "correct right-to-left, non-mirrored, exactly as written below with no shortening or rewording",
+    "orientation": "landscape",
+    "aspectRatio": "16:9",
+    "characterSheetAngles": [
+      "front",
+      "three-quarter",
+      "side",
+      "back"
+    ],
+    "maxPagesPerMessage": 1,
+    "maxPagesPerFile": 2,
+    "gamePages": {
+      "mazeAr": "كود Recursive Backtracking (ضمان حل واحد)، تقبل صورة الطفل كنقطة بداية، أيقونة نهاية وألوان حوائط قابلة للتخصيص حسب باليت كل قصة، تصدير PNG شفاف.",
+      "spotTheThingAr": "الـAgent لازم يكتب كل عنصر ومكانه بالتفصيل بنفسه — ممنوع تسيب الأداة تخترع العناصر من عندها.",
+      "placementAr": "مكان صفحة اللعبة لازم يتماشى مع منطق حركة الأحداث الفعلي.",
+      "companionAr": "لو فيه رفيق/صاحب في صفحة اللعبة، لازم يشارك فعليًا في اللعب مع البطل."
+    }
+  },
+  "printSafeColor": {
+    "printer": "RST Prints",
+    "coverageClass": "Rich Coverage",
+    "stock": "coated",
+    "rules": [
+      {
+        "id": "P1",
+        "ruleAr": "تجنب خلفيات كحلي غامق/أسود خالص/ألوان مشبعة غامقة تغطي مساحات كبيرة."
+      },
+      {
+        "id": "P2",
+        "ruleAr": "استخدام ألوان متوسطة الحدة — تقليل التشبع 15-20% عن الافتراضي."
+      },
+      {
+        "id": "P3",
+        "ruleAr": "مشاهد الليل: رمادي مزرق غامق (~#2C3E50) بدل الكحلي العميق (~#0A1633)."
+      },
+      {
+        "id": "P4",
+        "ruleAr": "تجنب حقول لون غامق Full-bleed — أدخل تدرجات/تكستشر/لمسات أفتح لكسر المساحة الغامقة."
+      },
+      {
+        "id": "P5",
+        "ruleAr": "مصادر الإضاءة الدافئة تفضل أعلى نقطة إضاءة، من غير تشبع برتقالي/أصفر زايد."
+      },
+      {
+        "id": "P6",
+        "ruleAr": "ألوان بشرة وملابس طبيعية متوسطة التشبع — بدون نيون."
+      },
+      {
+        "id": "P7",
+        "ruleAr": "ممنوع أسود خالص (#000000) كتعبئة — استخدم رمادي/بني دافئ غامق."
+      },
+      {
+        "id": "P8",
+        "ruleAr": "أي نص مطبوع لازم يكون K-only Black (100% K، 0% C/M/Y) — ممنوع Rich Black في أي نص."
+      },
+      {
+        "id": "P9",
+        "ruleAr": "الباليت العام ناعم/هادئ التشبع/أقرب للباستيل، مش صارخ."
+      },
+      {
+        "id": "P10",
+        "ruleAr": "التصدير النهائي: Ink Limit 280% أو حسب مواصفة المطبعة، GCR بدل UCR، وافحص كل صفحة في Acrobat Pro (Output Preview > Total Area Coverage)."
+      },
+      {
+        "id": "P11",
+        "ruleAr": "الباليت اللوني بيتحدد لكل قصة حسب عالمها — مش قالب ثابت بيتكرر."
+      }
+    ],
+    "inkLimitPercent": 280,
+    "separationMethod": "GCR",
+    "nightSceneHex": "#2C3E50",
+    "bannedNightSceneHex": "#0A1633",
+    "saturationReductionPercent": [
+      15,
+      20
+    ],
+    "bannedFillHex": [
+      "#000000"
+    ],
+    "textBlack": "K-only (100K / 0C / 0M / 0Y)",
+    "promptClauseEn": "Print-safe palette for coated stock: desaturate roughly 15-20% below default, no pure black (#000000) fills, no full-bleed deep-navy or heavy saturated dark fields, break any large dark area with gradient/texture/lighter accents, night scenes use desaturated blue-grey around #2C3E50, warm practical lights stay the brightest point without orange/yellow oversaturation, natural mid-saturation skin and clothing, no neon.",
+    "promptClauseAr": "باليت آمن للطباعة على ورق مطلي: قلل التشبع 15-20%، ممنوع أسود خالص، ممنوع خلفيات كحلي غامق full-bleed، اكسر أي مساحة غامقة بتدرج أو تكستشر، مشاهد الليل رمادي مزرق ~#2C3E50، الإضاءة الدافئة أعلى نقطة إضاءة من غير تشبع زايد، بشرة وملابس متوسطة التشبع بدون نيون."
+  },
+  "workflowOrder": [
+    "اسم الطفل + فكرة القصة",
+    "نص القصة كامل في الشات",
+    "مراجعة وتعديل من عمر",
+    "موافقة صريحة",
+    "دمج لحد 20 صفحة قصة بالظبط",
+    "Character Reference Sheets",
+    "برومبتات الصفحات",
+    "توليد الصور صفحة صفحة",
+    "الأغلفة في الآخر",
+    "PDF + فحص TAC/GCR قبل المطبعة"
+  ],
+  "projectStatus": {
+    "updatedAt": "2026-08-26",
+    "note": "Snapshot — يتحدّث يدويًا. المصدر: handoff.md §11.",
+    "stories": [
+      {
+        "titleAr": "عمر وأميرته الصغيرة",
+        "type": "A",
+        "topicAr": "غيرة",
+        "status": "مكتملة بالكامل (22 صفحة + ألعاب + أغلفة)"
+      },
+      {
+        "titleAr": "سما وأول يوم مدرسة",
+        "type": "B",
+        "topicAr": "أول يوم مدرسة",
+        "status": "نص معتمد، برومبتات الصور قيد التنفيذ",
+        "active": true
+      },
+      {
+        "titleAr": "سليم وسر الغابة المضيئة",
+        "type": "A",
+        "topicAr": "خوف من الضلمة",
+        "status": "ملف برومبتات صور كامل"
+      },
+      {
+        "titleAr": "يوسف ونجمة القلب الكبير",
+        "type": "A",
+        "topicAr": "غيرة",
+        "status": "مكتوبة ومراجعة"
+      },
+      {
+        "titleAr": "كريم وصقر النور",
+        "type": "C",
+        "topicAr": "مغامرة",
+        "status": "مكتوبة، محتاجة تنقيح كامل"
+      }
+    ],
+    "brandName": {
+      "status": "لسه مش محسوم",
+      "directionAr": "أسامي مخترعة بالكامل بدون معنى سابق",
+      "rejected": [
+        "قصتي",
+        "حكايتي",
+        "ذكرى",
+        "Storyo",
+        "بطلي",
+        "حكاية بطل",
+        "Talo",
+        "Mytho",
+        "Fablo"
+      ]
+    },
+    "printer": {
+      "name": "RST Prints",
+      "active": true,
+      "noteAr": "تم الاتفاق على قواعد الألوان الآمنة بسبب تصنيف Rich Coverage"
+    }
+  }
+}

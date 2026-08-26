@@ -5,10 +5,15 @@ import copy
 import importlib.util
 import json
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import handoff_fixture  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PIPELINE_PATH = ROOT / "tools" / "scripts" / "story_pipeline.py"
@@ -18,87 +23,15 @@ pipeline = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(pipeline)
 
 
+# The shared fixture is a full `hekayati-22` book, so index 1 is the fixed
+# dedication and the first authored story page sits at index 2.
+FIRST_STORY_INDEX = 2
+FIRST_STORY_PAGE_ID = "page-02"
+
+
 def make_story() -> dict:
-    page_ids = [
-        "cover",
-        *[f"page-{index:02d}" for index in range(1, 9)],
-        "back-cover",
-    ]
-    beats = [
-        "عنوان يعد بخطوة صغيرة",
-        "سلمى تشوف الغرض لأول مرة",
-        "الغرض يتحرك بعيد عنها",
-        "سلمى تحدد هدفها الواضح",
-        "سلمى تجرب الحل الأول",
-        "المحاولة تكشف علامة جديدة",
-        "سلمى تختار الحل المناسب",
-        "سلمى تنفذ اختيارها بنفسها",
-        "النتيجة تظهر قدام سلمى",
-        "سلمى ترجع مبسوطة وهادية",
-    ]
-    actions = [
-        "سلمى بتبص للعنوان",
-        "سلمى بتمد إيدها",
-        "الغرض بيتحرك بعيد",
-        "سلمى بتشاور لهدفها",
-        "سلمى بتحرك أول أداة",
-        "سلمى بتلاحظ العلامة",
-        "سلمى بتختار بإيدها",
-        "سلمى بتنظم القطع",
-        "سلمى بتشوف النتيجة",
-        "سلمى بترجع مكانها",
-    ]
-    texts = [
-        "سلمى وعلبة الألوان",
-        "سلمى لقت علبة ألوان مقفولة فوق مكتبها.",
-        "هزّت العلبة، فسمعت قطعة صغيرة بتتحرك جواها.",
-        "قالت: هفتحها من غير ما أكسر الغطا.",
-        "جرّبت المفتاح الأزرق، لكنه ما لفّش.",
-        "بصّت تحت المكتب، ولقت علامة نجمة.",
-        "اختارت المفتاح اللي عليه نفس النجمة.",
-        "حطّته في القفل، ولفّته براحة.",
-        "اتفتحت العلبة، وظهرت ألوان جدتها القديمة.",
-        "سلمى رتبت الألوان، وقفلت العلبة في مكانها.",
-    ]
-    pages = [
-        {
-            "id": page_id,
-            "text": texts[index],
-            "beat": beats[index],
-            "participants": ["persona-01"],
-            "guests": [],
-            "locationId": "home",
-            "setting": "أوضة سلمى",
-            "action": actions[index],
-        }
-        for index, page_id in enumerate(page_ids)
-    ]
-    return {
-        "title": "حكاية سلمى",
-        "targetAge": 5,
-        "languageProfileId": "age-3-5",
-        "language": "natural Egyptian Arabic",
-        "visualStyle": "storybook",
-        "personas": [
-            {
-                "id": "persona-01",
-                "displayName": "سلمى",
-                "role": "hero",
-                "fixedOutfit": "فستان أخضر",
-            }
-        ],
-        "narrativeArc": {
-            "setup": ["page-01"],
-            "disruption": ["page-02"],
-            "goal": ["page-03"],
-            "attempts": ["page-04", "page-05"],
-            "choice": ["page-06"],
-            "decisiveAction": ["page-07"],
-            "payoff": ["page-08"],
-            "resolution": ["back-cover"],
-        },
-        "pages": pages,
-    }
+    """A clean, doctrine-valid story to mutate one page at a time."""
+    return handoff_fixture.build_handoff_story()
 
 
 class AgeProfileCatalogTests(unittest.TestCase):
@@ -156,14 +89,14 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_formal_register_and_tanween_are_blocking(self) -> None:
         story = make_story()
-        story["pages"][1]["text"] = "ذهب سلمى إلى بيتًا بعيدًا."
+        story["pages"][FIRST_STORY_INDEX]["text"] = "ذهب سلمى إلى بيتًا بعيدًا."
         report = pipeline.review_story_quality(story)
         codes = {issue["code"] for issue in report["errors"]}
         self.assertIn("formal-case-ending", codes)
         self.assertIn("age-language-term", codes)
 
         story = make_story()
-        story["pages"][1]["text"] = "قالت سلمى: شكرًا يا ماما."
+        story["pages"][FIRST_STORY_INDEX]["text"] = "قالت سلمى: شكرًا يا ماما."
         report = pipeline.review_story_quality(story)
         self.assertFalse(
             any(issue["code"] == "formal-case-ending" for issue in report["errors"])
@@ -172,20 +105,20 @@ class StoryLanguageReviewTests(unittest.TestCase):
     def test_exact_quote_can_be_protected(self) -> None:
         story = make_story()
         quote = "عِلْمًا نَافِعًا"
-        story["pages"][1]["text"] = quote
-        story["pages"][1]["protectedPhrases"] = [
+        story["pages"][FIRST_STORY_INDEX]["text"] = quote
+        story["pages"][FIRST_STORY_INDEX]["protectedPhrases"] = [
             {"registryId": "dua-beneficial-knowledge"}
         ]
         report = pipeline.review_story_quality(story)
         self.assertFalse(
-            any(issue.get("pageId") == "page-01" for issue in report["errors"])
+            any(issue.get("pageId") == FIRST_STORY_PAGE_ID for issue in report["errors"])
         )
 
     def test_arbitrary_protection_cannot_hide_bad_copy(self) -> None:
         story = make_story()
         bad = "ذهب سلمى إلى بيتًا بعيدًا With Latin."
-        story["pages"][1]["text"] = bad
-        story["pages"][1]["protectedPhrases"] = [bad]
+        story["pages"][FIRST_STORY_INDEX]["text"] = bad
+        story["pages"][FIRST_STORY_INDEX]["protectedPhrases"] = [bad]
         report = pipeline.review_story_quality(story)
         codes = {issue["code"] for issue in report["errors"]}
         self.assertIn("invalid-protected-phrase", codes)
@@ -203,7 +136,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_inflected_formal_verbs_are_found(self) -> None:
         story = make_story()
-        story["pages"][1]["text"] = "فذهبت سلمى للبيت، وليست مستعدة، واستيقظت بدري."
+        story["pages"][FIRST_STORY_INDEX]["text"] = "فذهبت سلمى للبيت، وليست مستعدة، واستيقظت بدري."
         report = pipeline.review_story_quality(story)
         blocked_terms = {
             issue.get("term")
@@ -220,7 +153,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
         self.assertIn("استيقظ", warned_terms)
 
         story = make_story()
-        story["pages"][1]["text"] = "وجدان سلمى كان هادي في رأي ماما."
+        story["pages"][FIRST_STORY_INDEX]["text"] = "وجدان سلمى كان هادي في رأي ماما."
         report = pipeline.review_story_quality(story)
         self.assertFalse(
             any(
@@ -237,7 +170,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_page_hard_word_cap_blocks_lock_quality(self) -> None:
         story = make_story()
-        story["pages"][2]["text"] = " ".join(["كلمة"] * 23) + "."
+        story["pages"][FIRST_STORY_INDEX + 1]["text"] = " ".join(["كلمة"] * 23) + "."
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "page-too-long" for issue in report["errors"])
@@ -245,14 +178,14 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_sentence_caps_and_cover_exemption(self) -> None:
         story = make_story()
-        story["pages"][1]["text"] = "سلمى جريت. سلمى وقفت. سلمى ضحكت."
+        story["pages"][FIRST_STORY_INDEX]["text"] = "سلمى جريت. سلمى وقفت. سلمى ضحكت."
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "too-many-sentences" for issue in report["errors"])
         )
 
         story = make_story()
-        story["pages"][1]["text"] = " ".join(["كلمة"] * 11) + "."
+        story["pages"][FIRST_STORY_INDEX]["text"] = " ".join(["كلمة"] * 11) + "."
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "sentence-too-long" for issue in report["errors"])
@@ -271,9 +204,9 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_repeated_visible_text_and_suddenly_are_blocking(self) -> None:
         story = make_story()
-        story["pages"][2]["text"] = story["pages"][1]["text"]
-        story["refrainPhrases"] = [story["pages"][1]["text"]]
-        story["pages"][3]["text"] = "فجأة الباب فتح، وفجأة النور اختفى."
+        story["pages"][FIRST_STORY_INDEX + 1]["text"] = story["pages"][FIRST_STORY_INDEX]["text"]
+        story["refrainPhrases"] = [story["pages"][FIRST_STORY_INDEX]["text"]]
+        story["pages"][FIRST_STORY_INDEX + 2]["text"] = "فجأة الباب فتح، وفجأة النور اختفى."
         report = pipeline.review_story_quality(story)
         codes = {issue["code"] for issue in report["errors"]}
         self.assertIn("repeated-visible-text", codes)
@@ -309,8 +242,8 @@ class StoryLanguageReviewTests(unittest.TestCase):
         story["targetAge"] = 2
         story["languageProfileId"] = "age-1-2"
         story["refrainPhrases"] = ["هيلا هوب"]
-        story["pages"][1]["text"] = "هيلا هوب"
-        story["pages"][2]["text"] = "هيلا هوب"
+        story["pages"][FIRST_STORY_INDEX]["text"] = "هيلا هوب"
+        story["pages"][FIRST_STORY_INDEX + 1]["text"] = "هيلا هوب"
         report = pipeline.review_story_quality(story)
         self.assertFalse(
             any(issue["code"] == "repeated-visible-text" for issue in report["errors"])
@@ -334,7 +267,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
     def test_arc_order_and_hero_owned_choice_are_blocking(self) -> None:
         story = make_story()
         story["narrativeArc"]["choice"] = ["page-07"]
-        story["narrativeArc"]["decisiveAction"] = ["page-06"]
+        story["narrativeArc"]["decisiveAction"] = list(story["narrativeArc"]["choice"])
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "arc-stage-overlap" for issue in report["errors"])
@@ -342,7 +275,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
         story = make_story()
         by_id = {page["id"]: page for page in story["pages"]}
-        by_id["page-06"]["participants"] = []
+        by_id[story["narrativeArc"]["choice"][0]]["participants"] = []
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(
@@ -354,7 +287,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_arc_page_cannot_implicitly_own_two_stages(self) -> None:
         story = make_story()
-        story["narrativeArc"]["disruption"] = ["page-01"]
+        story["narrativeArc"]["disruption"] = [FIRST_STORY_PAGE_ID]
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(
@@ -364,7 +297,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
         )
 
         story = make_story()
-        story["pages"][1]["combinedArcStages"] = ["setup", "resolution"]
+        story["pages"][FIRST_STORY_INDEX]["combinedArcStages"] = ["setup", "resolution"]
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(
@@ -375,20 +308,20 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_new_cast_and_place_need_an_explicit_bridge(self) -> None:
         story = make_story()
-        story["pages"][2]["participants"] = ["persona-02"]
-        story["pages"][2]["locationId"] = "street"
+        story["pages"][FIRST_STORY_INDEX + 1]["participants"] = ["persona-02"]
+        story["pages"][FIRST_STORY_INDEX + 1]["locationId"] = "street"
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "unbridged-scene-cut" for issue in report["errors"])
         )
-        story["pages"][2]["transitionFromPrevious"] = (
+        story["pages"][FIRST_STORY_INDEX + 1]["transitionFromPrevious"] = (
             "لأن سلمى بعتت الرسالة، صاحبتها خرجت تدور عليها في الشارع."
         )
-        story["pages"][2]["text"] = story["pages"][2]["transitionFromPrevious"]
-        story["pages"][3]["transitionFromPrevious"] = (
+        story["pages"][FIRST_STORY_INDEX + 1]["text"] = story["pages"][FIRST_STORY_INDEX + 1]["transitionFromPrevious"]
+        story["pages"][FIRST_STORY_INDEX + 2]["transitionFromPrevious"] = (
             "صاحبتها رجعت لسلمى وقالت لها اللي شافته."
         )
-        story["pages"][3]["text"] = story["pages"][3]["transitionFromPrevious"]
+        story["pages"][FIRST_STORY_INDEX + 2]["text"] = story["pages"][FIRST_STORY_INDEX + 2]["transitionFromPrevious"]
         report = pipeline.review_story_quality(story)
         self.assertFalse(
             any(issue["code"] == "unbridged-scene-cut" for issue in report["errors"])
@@ -396,16 +329,16 @@ class StoryLanguageReviewTests(unittest.TestCase):
 
     def test_same_hero_cannot_teleport_with_hidden_metadata(self) -> None:
         story = make_story()
-        story["pages"][2]["locationId"] = "moon"
-        story["pages"][2]["transitionFromPrevious"] = "بعدها سلمى وصلت للقمر."
+        story["pages"][FIRST_STORY_INDEX + 1]["locationId"] = "moon"
+        story["pages"][FIRST_STORY_INDEX + 1]["transitionFromPrevious"] = "بعدها سلمى وصلت للقمر."
         report = pipeline.review_story_quality(story)
         self.assertTrue(
             any(issue["code"] == "unbridged-scene-cut" for issue in report["errors"])
         )
-        story["pages"][2]["text"] = "بعدها سلمى وصلت للقمر عشان تكمل مهمتها."
-        story["pages"][2]["transitionFromPrevious"] = story["pages"][2]["text"]
-        story["pages"][3]["text"] = "بعد الرحلة سلمى رجعت مكتبها ومعاها العلامة."
-        story["pages"][3]["transitionFromPrevious"] = story["pages"][3]["text"]
+        story["pages"][FIRST_STORY_INDEX + 1]["text"] = "بعدها سلمى وصلت للقمر عشان تكمل مهمتها."
+        story["pages"][FIRST_STORY_INDEX + 1]["transitionFromPrevious"] = story["pages"][FIRST_STORY_INDEX + 1]["text"]
+        story["pages"][FIRST_STORY_INDEX + 2]["text"] = "بعد الرحلة سلمى رجعت مكتبها ومعاها العلامة."
+        story["pages"][FIRST_STORY_INDEX + 2]["transitionFromPrevious"] = story["pages"][FIRST_STORY_INDEX + 2]["text"]
         report = pipeline.review_story_quality(story)
         self.assertFalse(
             any(issue["code"] == "unbridged-scene-cut" for issue in report["errors"])
@@ -414,7 +347,7 @@ class StoryLanguageReviewTests(unittest.TestCase):
     def test_malformed_json_shapes_return_review_errors_not_type_errors(self) -> None:
         cases = []
         story = make_story()
-        story["pages"][1]["id"] = []
+        story["pages"][FIRST_STORY_INDEX]["id"] = []
         cases.append(story)
         story = make_story()
         story["personas"] = 1

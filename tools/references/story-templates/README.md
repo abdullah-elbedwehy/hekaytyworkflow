@@ -1,11 +1,14 @@
 # Ready-made story templates
 
-`catalog.json` contains 15 complete, original personalized adventures for ages
-4-8. Their source copy is `age-3-5`; ages 6-8 trigger a required copy adaptation
-and story review before lock. Generated client files use the canonical language
-label `natural Egyptian Arabic`. A family can choose one, replace `{{hero}}` with the main persona's Arabic
-display name, add one optional note, then continue through the normal Hekayati
-story lock, prompt, image, review, and PDF flow.
+`catalog.json` contains 15 original personalized entertainment adventures.
+Only entries with `qualityStatus: "ready"` appear in the normal menu or may be
+applied. Educational books remain fully supported through the custom-story
+path, but this reusable catalog intentionally contains no sourced adaptations.
+
+The current ready menu contains 15 original entertainment adventures. Source
+copy is `age-3-5`; ages 6-8 trigger required copy adaptation and story review
+before lock. Generated client files use the canonical language label `natural
+Egyptian Arabic`.
 
 These are story templates, not art themes. Art still comes from
 `../themes/catalog.json`.
@@ -15,7 +18,7 @@ These are story templates, not art themes. Art still comes from
 | ID | Arabic title | Category | Core value |
 |---|---|---|---|
 | `thread-guardian-lantern-city` | `{{hero}} وحارس الخيوط في مدينة الفوانيس` | masked-city-rescue | calm courage and observation |
-| `princess-lujain-seven-doors` | `{{hero}} والأميرة لُجين في قصر الأبواب السبعة` | original-princess-palace | listening and inclusive hospitality |
+| `princess-lujain-seven-doors` | `{{hero}} ولُجين في قصر الأبواب اللي بتسمع` | original-princess-palace | listening and inclusive hospitality |
 | `frost-palace-warm-star` | `{{hero}} ونجمة الدفا في قصر الصقيع` | winter-princess-adventure | patience and flexible thinking |
 | `coral-cartographer-map` | `{{hero}} وخريطة مرجانة تحت البحر` | underwater-mermaid-adventure | care for nature and close observation |
 | `lost-cloud-train` | `{{hero}} وقطار الغيوم التايه` | sky-train-adventure | persistence and pattern reading |
@@ -30,13 +33,18 @@ These are story templates, not art themes. Art still comes from
 | `cloud-stadium-final` | `{{hero}} ونهائي ملعب السحاب` | football-sports-adventure | teamwork and fair play |
 | `colored-dream-gate` | `{{hero}} وبوابة الأحلام الملوّنة` | dream-emotion-adventure | every feeling has a useful message |
 
+There are currently no ready-made educational templates. Set an educational
+goal, author the client-specific story, then send it through the same quality
+and human-review gates. Do not import or lightly rewrite third-party stories
+into this shared catalog.
+
 ## Catalog contract
 
 Top level:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "catalogVersion": 2,
   "templates": {},
   "defaultTemplateId": "thread-guardian-lantern-city",
@@ -48,19 +56,31 @@ Top level:
 Every `templates` key equals its entry's `templateId`. Every entry contains:
 
 - `templateId`, `titleAr`, `titleEn`, `category`, `summaryAr`, and `purpose`.
+- `storyIntent`: exactly `educational` or `entertainment`.
+- `qualityStatus`: `ready` or `needs-revision`. Blocked entries need a
+  non-empty `qualityIssuesAr`; ready entries have no quality issues.
+- Educational entries have `moral`, `premiseAr`, `temptationAr`, `costAr`, and
+  `endingProofAr`.
+- Entertainment entries have `fantasyPromiseAr`, `heroWantAr`, `stakesAr`,
+  `heroMomentAr`, and `endingPayoffAr`.
 - `ageRange` with integer `min` and `max`.
 - Source `languageProfileId` (or root `defaultLanguageProfileId`) and a target
   profile derived from the client's exact age.
 - `tagsAr`, `mustShow`, and `avoid` string lists.
-- `pageCount: 20`.
+- `pageCount: 20` — this describes the **source** template, not the finished
+  book. Handoff §7 fixes a book at 24 PDF assets, so `apply-template`
+  reshapes the template and opens the two missing story pages as declared
+  holes a human must write. See [`../handoff.md`](../handoff.md).
 - `guestCharacters`, each with a unique `id`, `displayName`, and detailed
   original `appearanceNotes`.
 - `continuity.palette`, `continuity.recurringProps`, and `continuity.avoid`.
 - `locations[]` (1-8 reusable place bibles) and a valid `locationId` on every
   page.
 - `narrativeArc` or root `defaultNarrativeArc`, covering every non-cover page.
-- Exactly 20 pages in this order:
-  `cover`, `page-01` through `page-18`, `back-cover`.
+- Exactly 20 source pages in this order:
+  `cover`, `page-01` through `page-18`, `back-cover`. On apply these become
+  `cover`, `page-02`…`page-19`, `back-cover`, with `page-01` الإهداء,
+  `page-22` «قصص تانية», and empty `page-20`/`page-21` added.
 - Every page has `id`, short Egyptian-Arabic `text`, `beat`,
   `participantSlots`, `guests`, concrete `setting`, and drawable `action`.
 
@@ -89,9 +109,21 @@ inside `setting` or `action`.
 List and preview:
 
 ```bash
-python3 tools/scripts/story_pipeline.py list-templates
+python3 tools/scripts/story_pipeline.py list-templates --intent entertainment
 python3 tools/scripts/story_pipeline.py show-template \
   --template thread-guardian-lantern-city
+```
+
+`list-templates --intent educational` returns an empty menu and directs the
+operator to the custom-story path; it does not disable educational books.
+
+The story goal must be set before apply and must match the template:
+
+```bash
+python3 tools/scripts/story_pipeline.py set-story-goal \
+  --project /ABS/CLIENT \
+  --mode entertainment \
+  --goal "يساعد بطل مقنّع ينقذ المدينة"
 ```
 
 Apply to an initialized client project:
@@ -103,10 +135,13 @@ python3 tools/scripts/story_pipeline.py apply-template \
   --note "خلي البوصلة هدية من جدته"
 ```
 
-The template owns its 20-page count. `apply-template` personalizes
+The template owns its 20-page source count; the finished book is always 24. `apply-template` personalizes
 `{{hero}}`, expands the persona slots, copies original guests, and writes the
 derived client `input/story.json`. Per-family changes belong in that client
 story, not back in this shared catalog.
+
+`apply-template` rejects `needs-revision` entries even if someone knows the ID.
+`list-templates --include-drafts` exists only for authoring/audit work.
 
 The note is optional. Age adaptation is not: when source and target language
 profiles differ, rewrite the full page copy to the target dictionary and
@@ -133,7 +168,7 @@ themes, humiliation, or frightening violence.
 `input/brief.json`, and `output/book.json`. If one copy exists, all three must
 exist and these workflow-owned fields must match exactly:
 
-- `templateId`, `titleAr`, `catalogVersion`, `appliedAt`, and
+- `templateId`, `titleAr`, `catalogVersion`, `storyIntent`, `appliedAt`, and
   `customizationNote`.
 - `targetAge`, `sourceLanguageProfileId`, and `targetLanguageProfileId`.
 - `requiresAgeAdaptation`, `requiresRevision`, `ageAdaptedAt`, and
@@ -169,6 +204,9 @@ adventure wishes without copying protected characters.
 
 Before publishing or changing a template, verify:
 
+- Intent promise first. Educational stories prove the requested value or
+  replacement behaviour; entertainment stories deliver the stated fantasy and
+  payoff without turning into a hidden lesson.
 - Cause and effect reaches setup, disruption, goal, attempt, setback,
   observation, meaningful choice, decisive hero action, payoff, and resolution.
 - Guest characters guide or collaborate; they never solve the climax for the
@@ -202,8 +240,10 @@ Before publishing or changing a template, verify:
 - Stakes remain age-appropriate: no combat, weapons, falls, drowning,
   humiliation, villains, or punishment framing.
 - The moral emerges from the persona's choice. Avoid lecture-like ending copy.
+- For habit stories, exact `targetBehaviorAr` is visible on at least one `turn`
+  page and one later `reinforce` page.
 - Custom notes change details, not safety rules, identity locks, or the core
-  20-page structure.
+  20-page source structure.
 
 Run the catalog/unit validation after every edit:
 

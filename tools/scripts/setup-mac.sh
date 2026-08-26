@@ -107,6 +107,23 @@ install_node() {
   ok "Node $(node --version)"
 }
 
+install_pdf_tools() {
+  step "PDF inspection and rendering (Poppler + qpdf)"
+  local missing=()
+  if ! have pdftoppm || ! have pdfinfo; then
+    missing+=(poppler)
+  fi
+  have qpdf || missing+=(qpdf)
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    ok "pdftoppm, pdfinfo, and qpdf already available"
+    return
+  fi
+  brew install "${missing[@]}"
+  have pdftoppm && have pdfinfo && have qpdf \
+    || fail "PDF tools still missing after Homebrew install"
+  ok "PDF tools installed"
+}
+
 install_codex() {
   step "Codex CLI"
   if have codex; then
@@ -134,12 +151,14 @@ install_codex() {
 
 install_python_deps() {
   local py="$1"
-  step "Python packages (pillow, reportlab, pypdf)"
+  step "Python packages (images, PDF, Arabic shaping)"
   [[ -f "$REQS" ]] || fail "Missing $REQS"
   "$py" -m pip install --upgrade pip >/dev/null
   "$py" -m pip install -r "$REQS"
   "$py" - <<'PY'
 from PIL import Image  # noqa: F401
+import arabic_reshaper  # noqa: F401
+from bidi.algorithm import get_display  # noqa: F401
 import reportlab  # noqa: F401
 import pypdf  # noqa: F401
 print("imports ok")
@@ -150,18 +169,10 @@ PY
 check_dispatch() {
   step "codex-imagegen dispatch"
   local personal="$HOME/.cursor/skills/codex-imagegen/scripts/dispatch.py"
-  local repo="$ROOT/.cursor/skills/codex-imagegen/scripts/dispatch.py"
   if [[ -f "$personal" ]]; then
     ok "Found $personal"
-  elif [[ -f "$repo" ]]; then
-    ok "Found $repo"
-    mkdir -p "$HOME/.cursor/skills"
-    if [[ ! -e "$HOME/.cursor/skills/codex-imagegen" ]]; then
-      ln -s "$ROOT/.cursor/skills/codex-imagegen" "$HOME/.cursor/skills/codex-imagegen"
-      ok "Linked skill → ~/.cursor/skills/codex-imagegen"
-    fi
   else
-    fail "codex-imagegen dispatch.py not found under repo or ~/.cursor/skills"
+    fail "codex-imagegen dispatch.py not found under ~/.cursor/skills; install the Codex imagegen skill for this user"
   fi
 }
 
@@ -212,6 +223,7 @@ main() {
   py="$(install_python)"
   [[ -n "$py" ]] || fail "Could not resolve python binary"
   install_node
+  install_pdf_tools
   install_codex
   install_python_deps "$py"
   check_dispatch

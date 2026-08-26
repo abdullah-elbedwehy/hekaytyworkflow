@@ -45,7 +45,9 @@ In **every** image prompt (`compiledPrompt`, `guests.*.appearanceNotes`, scene t
 - **Never** write the character’s real name, nickname, or franchise title  
 - **Never** write logos, trademarks, or “official costume of …”
 
-Story Arabic in `story.json` / in-image text may still use a kid-friendly name if the family wants it in the book — but the **English `$imagegen` prompt must stay nameless**. Prefer inventing a local alias in story text when possible.
+Story Arabic in `story.json` may use an original kid-friendly alias, while the
+illustration prompt stays franchise-free. The image itself stays text-free; the
+Arabic caption is added later by the PDF builder.
 
 ## How to write guests
 
@@ -54,24 +56,24 @@ Store in `guests[]` / `guestCharacters[]`:
 ```json
 {
   "id": "guest-hero-01",
-  "displayName": "بطل العنكبوت",
-  "canonicalHint": "spider-man",
-  "appearanceNotes": "athletic youth hero in a full red-and-blue skintight suit with a black web-pattern overlay, large white eye lenses on a full-face mask, muscular but friendly silhouette, no logos, no brand marks"
+  "displayName": "سِراج",
+  "appearanceNotes": "athletic young adult rooftop rescuer in a close-fitting deep-plum and mint-green suit with a thin gold thread pattern over the shoulders, full soft-cloth face mask with two large rounded amber lenses, short mint half-cape clipped at one shoulder, coil of braided golden rope at the hip, fingerless grey gloves, no emblem, no logo"
 }
 ```
 
-- `canonicalHint` = private note for the agent only (optional). **Never** copy `canonicalHint` into `compiledPrompt`.
-- `appearanceNotes` + `compiledPrompt` = description only.
+- Do not store a franchise `canonicalHint` in client JSON. It can leak during
+  later copying or debugging.
+- `appearanceNotes` + `compiledPrompt` describe an original archetype only.
 
 ## Examples
 
 | Don’t say | Do say |
 |---|---|
-| Spider-Man | red-and-blue masked hero, web-pattern suit, white eye lenses |
-| Batman | dark armored vigilante cape, pointed cowl, bat-silhouette chest emblem avoided — use simple dark oval instead |
-| Elsa | young woman in sparkling ice-blue gown, platinum braid, frost magic aura |
+| Spider-Man | deep-plum and mint masked rooftop rescuer using a coil of golden rope |
+| Batman | midnight-purple rescue pilot with a rounded helmet, silver glider cape, and lantern tools |
+| Elsa | copper-haired weather keeper in a teal travel coat who shapes crystal mist with a brass wand |
 | Mickey Mouse | round-eared cartoon mouse in red shorts and yellow shoes — **avoid**; prefer original mouse friend design |
-| Superman | tall hero in blue suit, red cape, simple chest shield shape without letter |
+| Superman | tall sky rescuer in cream and forest-green flight gear with a short orange rescue cape, no chest emblem |
 
 ## compiledPrompt snippet pattern
 

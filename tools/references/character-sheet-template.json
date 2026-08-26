@@ -81,17 +81,7 @@
     "shotScale": "multi-view reference sheet",
     "viewpoint": "orthographic-friendly reference layout",
     "focalHierarchy": "faces and outfits first for every persona",
-    "textIntegration": {
-      "placement": "none",
-      "blendMode": "n/a",
-      "surface": "n/a",
-      "legibility": "n/a — no story text"
-    }
-  },
-  "text": {
-    "verbatimArabic": "",
-    "direction": "rtl",
-    "renderingRules": "No story text. No labels. No captions. No names written on the sheet."
+    "captionSafeZone": "no text anywhere on this sheet. Keep the bottom band calm and low-detail — do not draw a box, band, or panel; this sheet carries no caption."
   },
   "palette": "CHANGE: match story continuity palette",
   "continuity": {

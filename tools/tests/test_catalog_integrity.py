@@ -45,7 +45,7 @@ class ThemeCatalogTests(unittest.TestCase):
             "fingerprint",
             "visualStyle",
             "style",
-            "textBlendHint",
+            "textSafeZoneHint",
             "compiledPromptStyleBlock",
         )
         for theme_id, theme in self.themes.items():
@@ -124,17 +124,40 @@ class ArabicDetectionTests(unittest.TestCase):
                 self.assertEqual(pipeline.find_franchise_name_hits(text), [], text)
 
 
+class StoryTemplateCatalogSafetyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.catalog = load("story-templates", "catalog.json")
+
+    def test_reusable_catalog_contains_only_original_entertainment_templates(self) -> None:
+        templates = self.catalog["templates"]
+        self.assertEqual(15, len(templates))
+        self.assertEqual(
+            "thread-guardian-lantern-city",
+            self.catalog["defaultTemplateId"],
+        )
+        self.assertEqual(
+            {"entertainment": "thread-guardian-lantern-city"},
+            self.catalog["defaultTemplateByIntent"],
+        )
+        for template_id, template in templates.items():
+            with self.subTest(template=template_id):
+                self.assertEqual("entertainment", template["storyIntent"])
+                self.assertEqual("ready", template["qualityStatus"])
+                provenance = (template.get("moral") or {}).get("provenance") or {}
+                self.assertNotIn("sourceStoryId", provenance)
+
+
 class OrientationTests(unittest.TestCase):
     def test_page_ids_are_two_covers_plus_interior(self) -> None:
-        ids = pipeline.build_pdf_asset_ids(24)
-        self.assertEqual(len(ids), 24)
+        ids = pipeline.build_pdf_asset_ids(20)
+        self.assertEqual(len(ids), 20)
         self.assertEqual(ids[0], "cover")
         self.assertEqual(ids[-1], "back-cover")
         self.assertEqual(ids[1], "page-01")
-        self.assertEqual(ids[-2], "page-22")
+        self.assertEqual(ids[-2], "page-18")
 
     def test_covers_generate_after_the_interior(self) -> None:
-        book = {"settings": {"pdfPageCount": 24}}
+        book = {"settings": {"pdfPageCount": 20}}
         order = pipeline.generation_order(book)
         self.assertEqual(order[-2:], ["cover", "back-cover"])
         self.assertEqual(order[0], "page-01")

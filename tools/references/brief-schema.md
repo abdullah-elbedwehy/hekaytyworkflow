@@ -10,7 +10,8 @@ For newly generated files, `language` is always the canonical label
   "targetAge": 5,
   "languageProfileId": "age-3-5",
   "purpose": "adventure",
-  "pageCount": 20,
+  "storyGoal": null,
+  "pageCount": 24,
   "title": null,
   "outline": "عبدالله وسارة رايحين مغامرة",
   "templateSelection": null,
@@ -46,6 +47,22 @@ For newly generated files, `language` is always the canonical label
   "consent": { "confirmed": false, "statement": null }
 }
 ```
+
+## `storyGoal`
+
+Set this before choosing a plot:
+
+```bash
+python3 tools/scripts/story_pipeline.py set-story-goal \
+  --project /ABS/CLIENT \
+  --mode educational \
+  --goal "يتعلم يجهز شنطته وينزل المدرسة في ميعاده"
+```
+
+Modes are `educational` and `entertainment`. Educational may carry
+`personalization.habitFocus`; entertainment may not. A ready-made template
+must have the same `storyIntent` as this mode. `lock-story` also requires the
+same mode and `goalAr` in `story.json`.
 
 ## `personalization`
 
@@ -83,6 +100,7 @@ For a ready-made story, `apply-template` fills:
     "templateId": "thread-guardian-lantern-city",
     "titleAr": "عبدالله وحارس الخيوط في مدينة الفوانيس",
     "catalogVersion": 2,
+    "storyIntent": "entertainment",
     "appliedAt": "2026-07-17T12:00:00+00:00",
     "customizationNote": "خلي البوصلة هدية من جدته",
     "targetAge": 5,
@@ -97,7 +115,9 @@ For a ready-made story, `apply-template` fills:
 }
 ```
 
-The selected template writes a complete 20-page `input/story.json`. If target
+The selected template writes `input/story.json` reshaped to the handoff §7
+structure (24 PDF assets), with the two missing story pages opened as
+declared holes. If target
 age selects a different language profile, `requiresAgeAdaptation` also blocks
 lock until the page copy is rewritten, `review-story` meets the strict target
 density, and `complete-template-customization` records completion. For a
@@ -113,7 +133,7 @@ until that confirmation clears `requiresRevision`.
 `templateSelection` is workflow-owned mirrored state, not a brief-only note. If
 it exists in any one file, the same object must exist in `input/brief.json`,
 `input/story.json`, and `output/book.json`. These fields must match across all
-three: `templateId`, `titleAr`, `catalogVersion`, `appliedAt`,
+three: `templateId`, `titleAr`, `catalogVersion`, `storyIntent`, `appliedAt`,
 `customizationNote`, `targetAge`, `sourceLanguageProfileId`,
 `targetLanguageProfileId`, `requiresAgeAdaptation`, `requiresRevision`,
 `ageAdaptedAt`, and `customizedAt`. Do not edit them by hand.
@@ -136,7 +156,7 @@ Apply: `apply-theme --project <ABS> --theme <themeId>`.
 
 `pageCount` = total PDF pages (cover + middle + back cover). For custom stories,
 change it with `set-pages` before locking. Applying a ready-made template safely
-syncs the project to the template's 20-page count; it cannot be changed after
+syncs the project to the handoff §7 page count (24); it cannot be changed after
 template application.
 
 Multi-persona: `init` discovers every image under `personas/` (or project root). Interview must replace garbage filenames with real Arabic `displayName` + `fixedOutfit` per person.
