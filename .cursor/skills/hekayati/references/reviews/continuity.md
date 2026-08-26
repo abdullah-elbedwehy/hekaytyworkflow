@@ -12,6 +12,23 @@ Run after draft PDF exists. Do not edit client files. Write JSON only under clie
 
 ## Check
 
+### Handoff §8 identity drift
+
+The single most common failure in this business: the tool reaches for the last
+image it produced instead of the approved sheet, and the face walks away from
+itself over 20 pages.
+
+- Compare every page against the **accepted character sheet**, never against the
+  neighbouring page. Drift is only visible against the original.
+- Same face proportions, same eye size and shape, same nose and mouth, same skin
+  and hair tone as the sheet — not as the real photo.
+- No style drift toward realism, and no changing face proportions between pages.
+- The fixed outfit is identical on every page the person appears.
+- Landscape 16:9 on every page, no split frames, no portrait.
+
+Where realism and sheet-matching disagree, sheet-matching wins. Report any drift
+as blocking with the sheet as the reference.
+
 Compare against the locks, not against your memory of the previous page.
 
 ### Identity (per persona, every page they appear on)
@@ -57,15 +74,21 @@ Plot quality, Arabic spelling, or art taste. Only whether the locked things stay
 
 ## Output schema
 
+Every blocking issue needs `fixTarget`: `image`, `story`, or `pdf`. Outfit,
+identity, prop, and visual-location drift normally target `image`.
+
 ```json
 {
   "reviewerRole": "continuity",
+  "draftSha256": "<exact draftSha256 returned by verify>",
+  "storySha256": "<exact storySha256 returned by verify>",
   "pass": 1,
   "decision": "accept|revise",
   "issues": [
     {
       "assetId": "page-07",
       "severity": "high",
+      "fixTarget": "image",
       "category": "outfit-drift",
       "detail": "جنى is wearing a pink top; fixedOutfit is the yellow tank with a chest pocket",
       "fix": "regenerate page-07 with the outfit restated"

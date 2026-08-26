@@ -4,9 +4,14 @@ import argparse
 import importlib.util
 import json
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import handoff_fixture  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PIPELINE_PATH = ROOT / "tools" / "scripts" / "story_pipeline.py"
@@ -32,110 +37,35 @@ HABIT_PAYLOAD = {
     ],
 }
 
+ENTERTAINMENT_PERSONALIZATION = {
+    "traits": [{"personaId": "persona-01", "textAr": "بيحب الديناصورات"}],
+    "requests": [
+        {"kind": "place", "textAr": "بيت جدته في إسكندرية"},
+        {"kind": "thing", "textAr": "دبدوبه البني"},
+    ],
+}
+
+
+# Named slots inside the shared 24-page fixture, so the personalization arc
+# reads as intent instead of raw page numbers.
+SETUP_PAGE = "page-02"
+CHALLENGE_PAGE = "page-05"
+GRANDMA_PAGE = "page-09"
+TURN_PAGE = "page-16"
+REINFORCE_PAGES = ["page-17", "page-21"]
+
 
 def build_story(project: Path, page_ids: list[str]) -> dict:
-    """Minimal but lock-valid custom story for the given asset ids."""
-    beats = {
-        "cover": "عنوان يوعد برحلة هادية",
-        "page-01": "أحمد يستعد قبل الفصل",
-        "page-02": "التوتر يبدأ قبل دوره",
-        "page-03": "زيارة جدته تكشف فكرة مفيدة",
-        "page-04": "أحمد يرجع ويجرب الفكرة",
-        "page-05": "أحمد يختار التصرف الهادي",
-        "page-06": "اختيار أحمد ينجح قدام الفصل",
-        "back-cover": "أحمد يثبت عادته الجديدة",
-    }
-    texts = {
-        "cover": "أحمد وخطوته الهادية",
-        "page-01": "قبل الفصل، أحمد مسك كورة الإسفنج.",
-        "page-02": "قلبه دق بسرعة لما سمع اسمه.",
-        "page-03": "بعد المدرسة، أحمد راح بيت جدته في إسكندرية.",
-        "page-04": "بعد الزيارة، أحمد رجع المدرسة عشان يجرب الفكرة.",
-        "page-05": "اختار يعد لتلاتة قبل ما يبدأ كلامه.",
-        "page-06": "قال فكرته بهدوء، فصحابه سمعوه للآخر.",
-        "back-cover": "أحمد حط الكورة في شنطته للمرة الجاية.",
-    }
-    story_pages = []
-    for page_id in page_ids:
-        page = {
-                "id": page_id,
-                "text": texts[page_id],
-                "beat": beats[page_id],
-                "participants": ["persona-01"],
-                "guests": [],
-                "locationId": "grandma-house" if page_id == "page-03" else "school-yard",
-                "setting": "مكان",
-                "action": beats[page_id],
-            }
-        if page_id == "page-03":
-            page["transitionFromPrevious"] = (
-                "بعد المدرسة، أحمد راح بيت جدته في إسكندرية."
-            )
-        elif page_id == "page-04":
-            page["transitionFromPrevious"] = texts[page_id]
-        if page_id == "page-05":
-            page["combinedArcStages"] = ["choice", "decisiveAction"]
-        story_pages.append(page)
-    return {
-        "title": "قصة أحمد",
-        "targetAge": 5,
-        "languageProfileId": "age-3-5",
-        "language": "natural Egyptian Arabic",
-        "themeId": "storybook",
-        "visualStyle": "premium whimsical children's storybook digital illustration",
-        "purpose": "habit",
-        "pageCount": len(page_ids),
-        "outline": "أحمد بيتعلم يهدّي نفسه",
-        "personas": [
-            {
-                "id": "persona-01",
-                "displayName": "أحمد",
-                "role": "hero",
-                "fixedOutfit": "تيشرت أخضر وبنطلون جينز",
-            }
-        ],
-        "guestCharacters": [],
-        "locations": [
-            {
-                "id": "school-yard",
-                "nameAr": "فناء المدرسة",
-                "visualDefinition": (
-                    "A wide school yard with cream plaster walls, a green painted "
-                    "iron gate, four tall ficus trees along the east wall, grey "
-                    "concrete tiles, a red-and-white four-square court, and a low "
-                    "blue bench under the arcade."
-                ),
-                "pageCue": "the cream yard with the green gate and the blue bench",
-            },
-            {
-                "id": "grandma-house",
-                "nameAr": "بيت جدته في إسكندرية",
-                "visualDefinition": (
-                    "A first-floor Alexandria flat with a wooden balcony over a "
-                    "sea-facing street, teal shutters, a round brass tea tray on a "
-                    "carved side table, faded rose wallpaper, and a tall bookcase "
-                    "with glass doors beside the balcony arch."
-                ),
-                "pageCue": "the teal-shuttered balcony over the sea street",
-            },
-        ],
-        "continuity": {
-            "recurringProps": ["دبدوبه البني", "كورة إسفنج زرقاء"],
-            "palette": "teal, sand, warm gold",
-            "avoid": [],
-        },
-        "narrativeArc": {
-            "setup": [page_ids[1]],
-            "disruption": [page_ids[2]],
-            "goal": [page_ids[3]],
-            "attempts": [page_ids[4]],
-            "choice": [page_ids[-3]],
-            "decisiveAction": [page_ids[-3]],
-            "payoff": [page_ids[-2]],
-            "resolution": [page_ids[-1]],
-        },
-        "pages": story_pages,
-    }
+    """The shared lock-valid `hekayati-22` story (handoff §7)."""
+    story = handoff_fixture.build_handoff_story(
+        storyGoal={
+            "mode": "educational",
+            "goalAr": HABIT_PAYLOAD["habitFocus"]["targetBehaviorAr"],
+            "updatedAt": "2026-07-25T00:00:00+00:00",
+        }
+    )
+    assert [page["id"] for page in story["pages"]] == list(page_ids)
+    return story
 
 
 class PersonalizationCase(unittest.TestCase):
@@ -148,12 +78,19 @@ class PersonalizationCase(unittest.TestCase):
         personas = self.project / "personas"
         personas.mkdir()
         (personas / "ahmed.png").write_bytes(b"test fixture")
-        pipeline.command_init(argparse.Namespace(project=self.project, pages=8))
+        pipeline.command_init(argparse.Namespace(project=self.project, pages=handoff_fixture.PDF_PAGE_COUNT))
         self.brief_path = self.project / "input" / "brief.json"
         brief = pipeline.read_json(self.brief_path)
         brief["personas"][0]["displayName"] = "أحمد"
         brief["personas"][0]["fixedOutfit"] = "تيشرت أخضر وبنطلون جينز"
         pipeline.atomic_json(self.brief_path, brief)
+        pipeline.command_set_story_goal(
+            argparse.Namespace(
+                project=self.project,
+                mode="educational",
+                goal=HABIT_PAYLOAD["habitFocus"]["targetBehaviorAr"],
+            )
+        )
 
     def set_personalization(self, payload: dict, *, replace: bool = False) -> dict:
         return pipeline.command_set_personalization(
@@ -188,6 +125,17 @@ class PersonalizationBriefTests(PersonalizationCase):
         self.assertTrue(any("بيت جدته" in m for m in tagged))
         # Anti-shaming bans ride along with any habit work.
         self.assertTrue(any("عقاب" in a for a in brief["avoid"]))
+
+    def test_entertainment_goal_rejects_hidden_habit_lesson(self) -> None:
+        pipeline.command_set_story_goal(
+            argparse.Namespace(
+                project=self.project,
+                mode="entertainment",
+                goal="يساعد فريق أبطال في إنقاذ مهرجان سحري",
+            )
+        )
+        with self.assertRaisesRegex(pipeline.WorkflowError, "entertainment mode"):
+            self.set_personalization(HABIT_PAYLOAD)
 
     def test_second_call_merges_without_duplicating_tagged_lines(self) -> None:
         self.set_personalization(HABIT_PAYLOAD)
@@ -259,13 +207,22 @@ class PersonalizationBriefTests(PersonalizationCase):
 class PersonalizationLockTests(PersonalizationCase):
     def setUp(self) -> None:
         super().setUp()
-        self.page_ids = pipeline.build_pdf_asset_ids(8)
+        self.page_ids = pipeline.build_pdf_asset_ids(handoff_fixture.PDF_PAGE_COUNT)
         self.story_path = self.project / "input" / "story.json"
 
     def write_story(self, story: dict) -> None:
         pipeline.atomic_json(self.story_path, story)
 
     def lock(self) -> dict:
+        pipeline.command_prepare_story_review(
+            argparse.Namespace(project=self.project, force=False)
+        )
+        pipeline.command_approve_story_review(
+            argparse.Namespace(
+                project=self.project,
+                statement="راجعت النص والمشاهد كلها وموافق",
+            )
+        )
         return pipeline.command_lock_story(
             argparse.Namespace(project=self.project, story=None)
         )
@@ -276,27 +233,32 @@ class PersonalizationLockTests(PersonalizationCase):
             story, pipeline.read_json(self.brief_path)["personalization"]
         )
         story["personalization"]["habitArc"] = {
-            "setup": ["page-01"],
-            "challenge": ["page-02"],
-            "turn": ["page-04"],
-            "reinforce": ["page-05", "page-06"],
+            "setup": [SETUP_PAGE],
+            "challenge": [CHALLENGE_PAGE],
+            "turn": [TURN_PAGE],
+            "reinforce": list(REINFORCE_PAGES),
         }
         story["personalization"]["requestCoverage"] = {
-            "req-01": {"pages": ["page-03"], "locationId": "grandma-house"},
-            "req-02": {"pages": ["page-01", "page-04"]},
+            "req-01": {"pages": [GRANDMA_PAGE], "locationId": "grandma-house"},
+            "req-02": {"pages": [SETUP_PAGE, TURN_PAGE]},
         }
+        for page in story["pages"]:
+            if page["id"] in {TURN_PAGE, REINFORCE_PAGES[0]}:
+                page["action"] = HABIT_PAYLOAD["habitFocus"]["targetBehaviorAr"]
         return story
 
     def test_complete_story_locks_and_reports_the_arc(self) -> None:
         self.set_personalization(HABIT_PAYLOAD)
         self.write_story(self.full_story())
         result = self.lock()
-        self.assertEqual(["page-04"], result["habitArc"]["turn"])
+        self.assertEqual([TURN_PAGE], result["habitArc"]["turn"])
         self.assertEqual(["req-01", "req-02"], result["coveredRequests"])
 
     def test_story_without_personalization_still_locks(self) -> None:
         self.write_story(build_story(self.project, self.page_ids))
-        self.assertEqual(8, self.lock()["pageCount"])
+        self.assertEqual(
+            handoff_fixture.PDF_PAGE_COUNT, self.lock()["pageCount"]
+        )
 
     def test_missing_habit_arc_blocks_lock(self) -> None:
         self.set_personalization(HABIT_PAYLOAD)
@@ -309,7 +271,7 @@ class PersonalizationLockTests(PersonalizationCase):
     def test_stages_must_run_in_order(self) -> None:
         self.set_personalization(HABIT_PAYLOAD)
         story = self.full_story()
-        story["personalization"]["habitArc"]["turn"] = ["page-01"]
+        story["personalization"]["habitArc"]["turn"] = [SETUP_PAGE]
         self.write_story(story)
         with self.assertRaisesRegex(pipeline.WorkflowError, "must finish before"):
             self.lock()
@@ -318,10 +280,24 @@ class PersonalizationLockTests(PersonalizationCase):
         self.set_personalization(HABIT_PAYLOAD)
         story = self.full_story()
         for page in story["pages"]:
-            if page["id"] == "page-04":
+            if page["id"] == TURN_PAGE:
                 page["participants"] = []
         self.write_story(story)
         with self.assertRaisesRegex(pipeline.WorkflowError, "participants"):
+            self.lock()
+
+    def test_turn_and_reinforce_must_show_exact_replacement_behaviour(self) -> None:
+        self.set_personalization(HABIT_PAYLOAD)
+        story = self.full_story()
+        for page in story["pages"]:
+            if page["id"] in {TURN_PAGE, REINFORCE_PAGES[0]}:
+                page["text"] = "أحمد أخد نفس هادي وكمل."
+                page["beat"] = "أحمد يهدى ويكمل"
+                page["action"] = "أحمد واقف بهدوء"
+        self.write_story(story)
+        with self.assertRaisesRegex(
+            pipeline.WorkflowError, "replacement behaviour"
+        ):
             self.lock()
 
     def test_cover_cannot_carry_the_arc(self) -> None:
@@ -343,7 +319,7 @@ class PersonalizationLockTests(PersonalizationCase):
     def test_place_request_must_match_the_page_location(self) -> None:
         self.set_personalization(HABIT_PAYLOAD)
         story = self.full_story()
-        story["personalization"]["requestCoverage"]["req-01"]["pages"] = ["page-02"]
+        story["personalization"]["requestCoverage"]["req-01"]["pages"] = [SETUP_PAGE]
         self.write_story(story)
         with self.assertRaisesRegex(pipeline.WorkflowError, "set elsewhere"):
             self.lock()
@@ -380,6 +356,16 @@ class PersonalizationLockTests(PersonalizationCase):
 
 
 class PersonalizationTemplateRouteTests(PersonalizationCase):
+    def setUp(self) -> None:
+        super().setUp()
+        pipeline.command_set_story_goal(
+            argparse.Namespace(
+                project=self.project,
+                mode="entertainment",
+                goal="أحمد ينقذ مدينة الفوانيس في مغامرة خيالية",
+            )
+        )
+
     def apply_template(self, template_id: str) -> dict:
         return pipeline.command_apply_template(
             argparse.Namespace(
@@ -388,35 +374,42 @@ class PersonalizationTemplateRouteTests(PersonalizationCase):
         )
 
     def first_template_id(self) -> str:
-        return pipeline.command_list_templates(argparse.Namespace(category=None))[
+        return pipeline.command_list_templates(
+            argparse.Namespace(
+                category=None, intent="entertainment", include_drafts=False
+            )
+        )[
             "templates"
         ][0]["templateId"]
 
     def test_personalization_after_apply_reopens_the_revision_gate(self) -> None:
         applied = self.apply_template(self.first_template_id())
-        self.assertTrue(applied["readyToLock"])
-        result = self.set_personalization(HABIT_PAYLOAD)
+        # Catalog templates predate handoff §7, so applying one opens the two
+        # missing story slots first; it is never immediately lockable.
+        self.assertFalse(applied["readyToLock"])
+        self.assertTrue(
+            applied["templateSelection"]["requiresStructureExpansion"]
+        )
+        result = self.set_personalization(ENTERTAINMENT_PERSONALIZATION)
         selection = result["templateSelection"]
         self.assertTrue(selection["requiresRevision"])
         self.assertIn(pipeline.PERSONALIZATION_NOTE_TAG, selection["customizationNote"])
         self.assertIn("بيت جدته", selection["customizationNote"])
         story = pipeline.read_json(self.project / "input" / "story.json")
         self.assertEqual(
-            "persona-01", story["personalization"]["habitFocus"]["personaId"]
+            "persona-01", story["personalization"]["traits"][0]["personaId"]
         )
-        self.assertTrue(
-            any("عقاب" in item for item in story["continuity"]["avoid"])
-        )
+        self.assertEqual(2, len(story["personalization"]["requests"]))
 
     def test_personalization_before_apply_is_carried_into_the_template_story(
         self,
     ) -> None:
-        self.set_personalization(HABIT_PAYLOAD)
+        self.set_personalization(ENTERTAINMENT_PERSONALIZATION)
         applied = self.apply_template(self.first_template_id())
         self.assertFalse(applied["readyToLock"])
         self.assertIn(pipeline.PERSONALIZATION_NOTE_TAG, applied["customizationNote"])
         story = pipeline.read_json(self.project / "input" / "story.json")
-        self.assertEqual(3, len(story["personalization"]["requests"]))
+        self.assertEqual(2, len(story["personalization"]["requests"]))
 
     def test_family_note_survives_a_personalization_update(self) -> None:
         pipeline.command_apply_template(
@@ -427,7 +420,7 @@ class PersonalizationTemplateRouteTests(PersonalizationCase):
                 force=False,
             )
         )
-        result = self.set_personalization(HABIT_PAYLOAD)
+        result = self.set_personalization(ENTERTAINMENT_PERSONALIZATION)
         note = result["templateSelection"]["customizationNote"]
         self.assertIn("عيد ميلاده", note)
         self.assertIn(pipeline.PERSONALIZATION_NOTE_TAG, note)

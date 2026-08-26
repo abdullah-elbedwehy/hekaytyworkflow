@@ -100,19 +100,12 @@
     "shotScale": "CHANGE: wide|medium|close — must differ from adjacent pages",
     "viewpoint": "CHANGE: eye-level|low|high — must differ from adjacent pages",
     "focalHierarchy": "CHANGE: who/what eye hits first, second, third",
-    "textIntegration": {
-      "placement": "CHANGE: top|bottom|side — quiet zone in art, differ from adjacent pages",
-      "blendMode": "CHANGE: painted-into-sky | soft-caption-band | chalk-on-surface | carved-sign | floating-letterforms matching palette",
-      "surface": "CHANGE: what the Arabic sits on (sky wash, stone path, wooden beam, soft vignette band sharing scene colors)",
-      "legibility": "high — readable at print size, never cropped, never colliding with faces/hands"
-    }
-  },
-  "text": {
-    "verbatimArabic": "CHANGE: exact string from story.json for this page",
-    "direction": "rtl",
-    "renderingRules": "Render the quoted Arabic exactly once inside the illustration, right-to-left, correctly connected, fully legible, with no missing, added, reversed, mirrored, or substituted characters. Blend the lettering into the scene as part of the art — soft storybook typography that shares the page palette, lighting, and texture (gentle painted caption band, sky wash, or environmental surface). Do NOT use a hard white box, sticker label, speech bubble, or detached UI panel. Keep a quiet clear zone so faces and action stay unobstructed. Large simple Arabic display typeface. No Latin text."
+    "lens": "CHANGE: lens feel, e.g. 35mm-equivalent slight wide, no distortion at the edges",
+    "depthOfField": "CHANGE: what is sharp and what falls soft, e.g. child sharp, background softly out of focus",
+    "captionSafeZone": "bottom band of the frame stays calm and low-detail: no faces, hands, or key action there. Do not draw a box, band, or panel — the caption is added later as a real PDF text layer."
   },
   "palette": "CHANGE once in story continuity, reuse with beat emphasis only",
+  "colorScript": "CHANGE: how this beat shifts the base palette — which one colour leans warmer/cooler/more saturated and why the beat calls for it. Never a new palette.",
   "continuity": {
     "fromPreviousPage": "CHANGE: props/outfit/state carried forward for each returning persona",
     "recurringProps": [],
@@ -125,7 +118,7 @@
     "one shared visible moment",
     "landscape full-bleed full-page illustration (wider than tall)",
     "describe every visible layer: foreground, midground, background, props",
-    "Arabic text blended into the artwork, not a separate box"
+    "no text, letters, numbers, or signage anywhere in the image"
   ],
   "avoid": [
     "extra people",

@@ -2,17 +2,35 @@
 
 Use this as the operating contract when running Hekayati. Do not invent a parallel flow.
 
+> **The source of truth is [`handoff.md`](handoff.md).** This file is downstream
+> of it. If anything here contradicts the handoff, follow the handoff and fix
+> this file. Machine-readable: [`handoff/doctrine.json`](handoff/doctrine.json).
+> Enforcement map: [`handoff-enforcement.md`](handoff-enforcement.md).
+> Read the rulebook with `show-doctrine`; check one story against it with
+> `check-doctrine --project <ABS>`.
+
 ## Mission
 
-Build Arabic children's storybook in the **client** folder: identity/consent → exact age profile → ready-made template or custom interview → causally locked story → JSON prompts → Codex `$imagegen` → PDF → review → fix. Tools live in `hekaytyworkflow/tools/`. Never write client artifacts into tools.
+Build Arabic children's storybook in the **client** folder: identity/consent →
+educational-or-entertainment goal → exact age profile → matching ready-made
+template or custom interview → deterministic/semantic QA → user-edited Markdown
+storyboard approval → locked story → JSON prompts → Codex `$imagegen` → PDF →
+review → fix. Tools live in
+`hekaytyworkflow/tools/`. Never write client artifacts into tools.
 
 ## Be helpful (book start)
 
-On `ابدأ` / `start` / new book: **proactively offer full menus** — do not wait for the family to ask.
+On `ابدأ` / `start` / new book: **ask the goal before the plot menu**.
 
-1. Run `list-templates` + `list-themes` (live catalogs; never hard-code stale lists).
-2. Show **every** ready-made adventure (Arabic title + one-line summary) **and** **every** art theme (`labelAr` / `label` + short look). Offer custom story as an extra option.
-3. Guide next step clearly: confirm exact age → load `show-age-profile --age N` → pick template or custom → confirm names/roles/outfits → pick theme → consent → continue.
+1. Ask: `تحب القصة تساعد في سلوك/قيمة، ولا تبقى مغامرة للتسلية؟`
+2. Run `set-story-goal --mode educational|entertainment --goal "…"`.
+3. Run `list-templates --intent <mode>` + `list-themes` (live catalogs; never
+   hard-code stale lists).
+4. Show **every ready** template in that branch (Arabic title + one-line
+   summary) and **every** art theme. Offer custom story too. Never show a
+   `needs-revision` template as a usable client choice.
+5. Confirm exact age → load `show-age-profile --age N` → pick template or
+   custom → confirm names/roles/outfits → pick theme → consent → continue.
 
 Details: `$TOOLS/references/interview.md`.
 
@@ -21,18 +39,24 @@ Details: `$TOOLS/references/interview.md`.
 Use `$TOOLS/references/story-templates/catalog.json` when the family wants to
 choose instead of inventing a plot from scratch.
 
-1. `list-templates` — show **all** catalog choices (Arabic titles + summaries).
-2. `show-template --template ID` — preview the complete 20-page plan.
+1. `list-templates --intent <chosen-mode>` — show all ready choices in the
+   already selected branch.
+2. `show-template --template ID` — preview the source plan. Applying it
+   reshapes it into the 22+2 book and opens two story slots to write.
 3. `apply-template --project … --template ID [--note "…"]` — personalize
    `{{hero}}`, map `hero` / `companions` / `all` participant slots, and write
    client `input/story.json`.
-4. If a note is added, revise only affected beats. If the source and target age
+4. Confirm that `template.storyIntent == brief.storyGoal.mode`. If a note is
+   added, revise only affected beats. If the source and target age
    profiles differ, adapt the full page copy to the target profile as well. Run
-   `review-story`, then `complete-template-customization`; `lock-story` blocks
+   `review-story`, then apply the semantic story rubric to the text-only story,
+   then `complete-template-customization`. Export the Markdown storyboard and
+   stop for the user's review; `lock-story` blocks
    while either revision gate is pending. If neither gate is open, the story is
    ready.
-5. Identity/outfit/age must already be confirmed before apply. Pick theme and
-   confirm consent before image generation, then continue from `lock-story`.
+5. Identity/outfit/age must already be confirmed before apply. Pick theme,
+   confirm consent, and complete the permanent story-review gate before image
+   generation; only then continue from `lock-story`.
 
 `set-template-note` may add, replace, or clear the note before `lock-story`.
 Never silently replace an existing story; `--force` is valid only before prompt
@@ -51,22 +75,125 @@ range and total interior words must reach the target recommended band. The
 usual density warnings become blockers for `complete-template-customization`
 and `lock-story`; staying under hard maxima is not completion.
 
+## Permanent human story-review gate
+
+This gate runs for every book, ready-made or custom. It is not optional and is
+never replaced by the agent's deterministic or semantic QA.
+
+1. Finish `review-story` and the semantic rubric; fix all blockers.
+2. Run `prepare-story-review --project <ABS>`. This writes
+   `input/story-review.md` with every page's exact text and scene description.
+3. **Stop.** Show the absolute file path. The client folder can be opened as an
+   Obsidian vault. The user may edit visible fields but must keep the HTML
+   page/field marker comments.
+4. When the user says they finished, re-read the file and run
+   `story-review-status`; do not rely on an earlier in-memory draft.
+5. Run `approve-story-review --project <ABS> --statement "…"`. It parses the
+   reviewed Markdown, syncs approved edits into `story.json`, reruns story QA,
+   and records content hashes.
+6. Only then run `lock-story`, prompts, images, or PDF commands.
+
+Never overwrite an existing review file unless the user deliberately asks for
+a fresh export. Any edit to `story.json` or `story-review.md` after approval
+makes the approval stale and returns the workflow to this gate.
+
 ## Parallel is law
 
 | Work | How |
 |---|---|
 | Write prompts | Write **all** `input/prompts/*.json` in one pass (character-sheet + every location-sheet + every PDF page). Never page-by-page waiting. |
+| Human story gate | `prepare-story-review` → stop for user edits in `input/story-review.md` → `approve-story-review` → `lock-story` |
 | Compile | One `compile-prompts` — the pipeline builds `compiledPrompt` from your fields |
-| Validate | One `validate-prompts` after all files exist |
-| Images | `generate-book-images` — sheets first, then interior pages in one parallel dispatch, then covers |
+| Gate | One `preflight` — environment + story + compile + validation in a single verdict |
+| Images | `generate-book-images` — three waves, see below |
 | Reviews | Run story / arabic / continuity / pdf rubrics **in parallel**, then `merge-reviews` |
 | Fixes | Failed pages → bump prompt versions → `compile-prompts` → one parallel re-dispatch for failed ids only |
 
 Never open N sequential Codex chats. Never `--sequential` unless user asks.
 
-## Six locks that keep a book coherent
+### The three image waves
 
-A book falls apart when any of these drift. All six are enforced by the pipeline — do not work around them.
+```text
+wave A   character-sheet + EVERY location-sheet   ← one dispatch, together
+         ↓ (accept gate on the sheet only)
+wave B   all interior pages                        ← one dispatch
+         ↓
+wave C   cover + back-cover                        ← last, so they match finished art
+```
+
+Wave A renders the sheets **together** on purpose. A location sheet is the empty
+place — no people in it — so it shares no identity state with the character
+sheet and nothing about it depends on the sheet being approved. Splitting them
+cost a whole dispatch round plus the family's thinking time while five of six
+render lanes sat idle. If the sheet is rejected, only the sheet is redrawn; the
+places are still good.
+
+Jobs that come back empty are **retried inside the wave** (`--retries`, default
+1) instead of being handed back as a one-page fix task. Do not manually retry a
+page until the wave itself reports it failed twice.
+
+### Report progress, every time
+
+Every command that touches a project returns a `progress` block. After each
+long step, tell the family the number — do not invent your own estimate:
+
+```bash
+python3 $TOOLS/scripts/story_pipeline.py progress --project <ABS>
+```
+
+Paste `progress.messageAr` as-is. It already carries the percent in
+Arabic-Indic numerals, the current phase, the page counter, and the remaining
+time estimated from **this** machine's measured render times.
+
+## The book is 22 interior pages + 2 separate covers (handoff §7)
+
+| Asset | Role |
+|---|---|
+| `cover` | front cover, outside the 22 |
+| `page-01` | الإهداء — fixed text, `{{hero}}` substituted |
+| `page-02` … `page-21` | the story — **exactly 20 pages** |
+| `page-22` | «قصص تانية» — 3 RTL rows, fixed layout |
+| `back-cover` | back cover, fixed marketing copy + 5 mandatory icons |
+
+`settings.pdfPageCount = 24`, `settings.bookStructure = "hekayati-22"`.
+
+The dedication, «قصص تانية», and back-cover copy belong to the doctrine. Write
+them with `apply-fixed-pages --project <ABS>`; rewriting them by hand is a
+blocking error. They are excluded from the age word budget and from the causal
+spine on purpose.
+
+**Merge rule.** A first draft usually runs long. Merge adjacent events down to
+exactly 20 story pages *before* any image prompt — the merge itself can be the
+bridge. A ready-made template is two pages short of this shape, so applying one
+opens `page-20` and `page-21` as declared holes; the pipeline refuses to invent
+them, because inventing them is exactly the «مشهد حشو» handoff §3 N3 forbids.
+
+## Story type is chosen before the plot (handoff §5)
+
+| Type | Use | `storyGoal.mode` | Cast rule |
+|---|---|---|---|
+| **A** | تصحيح سلوك داخلي (خوف، غيرة، غضب) | `educational` | magical companion **required**; a `setback` (انتكاسة) beat is required before the fix |
+| **B** | تشجيع على مكان (مدرسة، حضانة، دكتور) | `educational` | real friends only — **no** magical companion; side friends share the hero's gender |
+| **C** | مغامرة خيالية | `entertainment` | original characters only; the child owns the decisive action |
+
+```bash
+python3 $TOOLS/scripts/story_pipeline.py set-story-type --project <ABS> --type A
+```
+
+## Language rules that outrank everything (handoff §2)
+
+1. **No literary metaphor for an inner feeling.** Not «حد سرق مكانه», not «قلبه بقى أكبر», not «التقيلة في صدره خفت». Say what the child actually thinks: «حد أخد مكانه وحب بابا وماما منه».
+2. **Resolve the emotional crisis with a concrete event** — a gift arriving, a hug, playing together — never an abstract inner shift.
+3. **Reassurance is plain and warm, never a proverb.**
+
+`review-story` blocks on these. It folds diacritics and hamza first, so a
+vowelled spelling does not slip through.
+
+## Seven locks that keep a book coherent
+
+A book falls apart when any of these drift. Deterministic locks are enforced by
+the pipeline; the semantic goal lock also requires the pre-image story rubric.
+Do not work around either.
 
 | Lock | Owner | Enforced by |
 |---|---|---|
@@ -76,6 +203,25 @@ A book falls apart when any of these drift. All six are enforced by the pipeline
 | **Prompt** — same structure, bounded length | `compile-prompts` builds `compiledPrompt` from fields | `load_prompt_payload` rejects over/under-length |
 | **Language** — age-fit natural Egyptian, not mixed formal prose | `targetAge` → `languageProfileId` + age dictionary | `review-story`; `lock-story` blocks hard word/sentence/register failures |
 | **Causality** — every beat changes the next beat | ordered `narrativeArc` + explicit bridge on hard scene cuts | `review-story`; `lock-story` blocks missing stages, gaps, jumps, or adult-owned climax |
+| **Goal** — educational proof or entertainment payoff | `storyGoal` + intent-specific spine | `review-story` validates fields; pre-image semantic rubric validates meaning |
+
+### Story goal (required before plot selection)
+
+Every book has exactly one branch:
+
+- `educational`: the story demonstrates a requested value or a drawable
+  replacement behaviour. It needs temptation/pattern, visible cost,
+  child-owned choice, and later proof. With `habitFocus`, the exact
+  `targetBehaviorAr` must appear in a `turn` page and again in a `reinforce`
+  page.
+- `entertainment`: the story fulfills the stated fantasy promise. It needs an
+  early invitation, escalating obstacles, a child-owned hero moment, and an
+  ending payoff. Do not bolt on a corrective lesson.
+
+The famous guest/archetype may invite, need help, and collaborate. The child
+still owns the decisive action. A syntactically valid arc is not enough: write
+the `because → therefore` chain and reject any page that survives only as “and
+then.”
 
 ### Age language profile (required)
 
@@ -188,9 +334,12 @@ python3 $TOOLS/scripts/story_pipeline.py set-personalization \
    family plainly instead of silently dropping the rest.
 2. **Always get the replacement behaviour.** "يبطل قضم ضوافره" is not drawable —
    `targetBehaviorAr` must be what the child does instead.
-3. **The story must prove it.** `lock-story` rejects a story whose
+3. **The story must prove it.** Habits require the `educational` branch.
+   `lock-story` rejects a story whose
    `personalization.habitArc` is missing or out of order, or whose required
-   requests have no `requestCoverage`. Write both while you write the pages.
+   requests have no `requestCoverage`. The exact `targetBehaviorAr` must be
+   visible in at least one `turn` and one `reinforce` page. Write both while you
+   write the pages.
 4. **The child solves it.** The `turn` page is the child's own decision — never an
    adult, never magic. Shaming, punishment, and lecture pages are auto-added to
    `avoid`.
@@ -217,27 +366,30 @@ Call pipeline only with absolute `--project`. Pick command by state:
 
 | State | Call |
 |---|---|
-| New client folder / book start | `init` → `list-templates` + `list-themes` → show full menus |
+| New client folder / book start | `init` → `set-story-goal` → matching `list-templates --intent …` + `list-themes` |
 | Family describes the child (habit, trait, "لازم يظهر …") | `set-personalization --project … --json '{…}'` |
 | Check what was captured | `show-personalization --project …` |
-| Family wants a ready-made story | `list-templates` → `apply-template --project … --template ID [--note …]` |
+| Family wants a ready-made story | `list-templates --intent <storyGoal.mode>` → `apply-template --project … --template ID [--note …]` |
 | Template selected, note changes | `set-template-note --project … --note …` |
 | Template note and/or age adaptation incorporated | `review-story` → `complete-template-customization --project …` |
 | Browse art themes | `list-themes` |
 | Pick art theme | `apply-theme --project … --theme <themeId>` |
-| Missing custom story | write `input/story.json` (incl. `locations[]`) → `lock-story` |
+| Missing custom story | write `input/story.json` (incl. `storyGoal` + `locations[]`) → deterministic + semantic story review |
 | Need the age voice / dictionary | `show-age-profile --age N` |
-| Story draft written or edited | `review-story --project …` → fix every error → `lock-story` |
-| Ready-made `story.json` reviewed | `lock-story` |
+| Story draft written or edited | `review-story --project …` → run semantic story rubric → fix every error → `prepare-story-review` |
+| Markdown storyboard prepared | stop; user reviews/edits `input/story-review.md` in Obsidian |
+| User confirms storyboard | re-read file → `approve-story-review --statement "…"` → `lock-story` |
 | Family asks for a famous character | `list-guests` → `show-guest --guest <key>` → paste `appearanceNotes` |
-| Prompts missing / rewritten | write all JSON → `compile-prompts` → `validate-prompts` |
-| Prompts valid, no sheet image | `generate-book-images` |
+| Prompts missing / rewritten | write all JSON → `preflight` (compiles + validates + reports every blocker at once) |
+| Prompts valid, no sheet image | `generate-book-images` — wave A renders the sheet **and** every location sheet together |
 | Sheet awaiting review | show image → `character-review --accept` (or reject + new prompt version) |
-| Sheet accepted | `generate-book-images` — location sheets, then interior, then covers |
+| Sheet accepted | `generate-book-images` — interior pages, then covers |
+| Family asks "خلصنا كام؟" | `progress --project <ABS>` → paste `progress.messageAr` |
 | All images ready | `build --edition draft` → `verify` |
 | Draft ready | run 4 review rubrics in parallel → `merge-reviews` |
 | Fix queue | rewrite failed prompts `.v0N` → `compile-prompts` → validate → regenerate failed only → rebuild |
-| User says تمام | `build --edition final` → `verify` |
+| Attempt-limit/manual issue | `resolve-manual-review --asset ID (--accept\|--image <ABS>) --statement "…"` |
+| User approves current verified draft | `approve-final --statement "…"` → `build --edition final` → `verify` |
 
 Do **not** call `begin-asset` / `generate-asset` one-by-one for first-pass pages. Prefer `generate-book-images` / `generate-pages-parallel` / `generate-batch`.
 
@@ -255,9 +407,32 @@ When 2+ participants on page:
 - Clear face visibility for every on-page persona
 - No identity mix (name A must match photo A)
 
-### Text blend
+### Print-safe colour (handoff §9, mandatory in every prompt)
 
-Exact Arabic from `story.json` once, RTL, connected, legible. Blend **inside** the art using the active theme’s `textBlendHint` (storybook: soft painted caption / sky wash; cartoony: soft 3D-integrated caption band). Never hard white box, sticker, or speech bubble (unless story asks). Quiet zone away from faces.
+The book prints Rich Coverage on coated stock at RST Prints. `compile-prompts`
+adds the print-safe clause to **every** prompt at a priority the length-shedding
+pass never drops, and `validate-prompts` rejects a prompt without it. Do not
+remove it, and do not write a palette that fights it: desaturate 15–20%, no pure
+black fills, no full-bleed deep navy, night scenes around `#2C3E50`, no neon.
+The palette itself is chosen per story from that story's world — it is not a
+template reused between books.
+
+Before sending to the printer, remind Omar to check Ink Limit 280%, GCR instead
+of UCR, and Total Area Coverage per page in Acrobat Pro.
+
+### Caption safe zone
+
+The story text is **never** painted into the art. Illustrations come back
+completely text-free, and the PDF builder draws the Arabic afterwards as a real,
+editable text layer.
+
+Every page prompt therefore forbids all writing in the image — captions, signs,
+posters, book covers, labels — and reserves the bottom band of the frame as a
+calm, low-detail zone: no faces, hands, or key action there, and no drawn box or
+panel. Use the active theme’s `textSafeZoneHint` for how that quiet band should
+look in that medium. `validate-prompts` rejects a page prompt missing the
+text-free clause, and also rejects one that leaks the story text into the art
+prompt.
 
 ### Copyright-safe famous characters
 
@@ -276,20 +451,13 @@ enters reusable catalog or image-prompt text.
 
 ### `compiledPrompt`
 
-**Do not hand-write it.** Fill the structured fields, run `compile-prompts`, and the pipeline assembles it. See "Six locks" above.
+**Do not hand-write it.** Fill the structured fields, run `compile-prompts`, and the pipeline assembles it. See "Seven locks" above.
 
 ## Art themes
 
-`$TOOLS/references/themes/catalog.json` — offer **all** via `list-themes`:
-
-| `themeId` | Look |
-|---|---|
-| `storybook` (default) | ستوري بوك رسمة — painterly whimsical |
-| `cartoony` | كرتوني ثلاثي الأبعاد — stylized 3D CGI |
-| `fairytale-glow` | توهج الحكايات — soft fairy-tale animation |
-| `feature-cgi` | ثلاثي أبعاد سينمائي — feature-film 3D CGI |
-| `enchanted-glow` | توهج ساحر — night fairy-tale 3D glow |
-| `wonder-trail` | درب العجائب — vibrant painterly adventure |
+`$TOOLS/references/themes/catalog.json` is the only theme source of truth.
+Always call `list-themes` and offer every returned option; never copy a short
+theme list into instructions because the catalog changes.
 
 Interview picks `themeId`; `apply-theme` syncs brief/story + style refs. See `style-lock.md`.
 
@@ -298,7 +466,8 @@ Interview picks `themeId`; `apply-theme` syncs brief/story + style refs. See `st
 - Gemini / OpenAI Images API / key CSVs
 - Client artifacts inside `hekaytyworkflow/`
 - Overwriting prompt versions (bump `.v02`, `.v03`…)
-- Generating pages before character-sheet accepted (unless `--auto-accept-character`)
+- Generating pages before the user accepts the character sheet
+- Generating any image before the current Markdown storyboard is approved
 - Generating pages before every location sheet exists
 - Generating covers before the interior is finished
 - Franchise names in any image-bound field, Latin or Arabic

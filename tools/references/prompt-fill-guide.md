@@ -1,7 +1,12 @@
 # Prompt fill guide
 
 Copy `prompt-template.json` → `input/prompts/<assetId>.v0N.json`.  
-Read `$TOOLS/references/agent-core.md` first (parallel + multi-persona + routing).
+Read `$TOOLS/references/agent-core.md` first (parallel + multi-persona + routing),
+then **[prompt-rules.md](prompt-rules.md)** — the ultra-detail contract, with the
+word floors and banned vocabulary that `validate-prompts` enforces mechanically.
+
+This file says *which field goes where*. `prompt-rules.md` says *how specific
+each field has to be*, and the pipeline blocks on it.
 
 ## You fill fields; the pipeline writes the prompt
 
@@ -28,11 +33,19 @@ After `lock-story`, write **every** prompt file in one pass:
 
 Then one `compile-prompts`, then one `validate-prompts`. Never drip prompts page-by-page before generate.
 
-## Quality bar (non-negotiable)
+## Quality bar (non-negotiable, and mechanically enforced)
+
+`validate-prompts` scores every prompt 0-100 and blocks below **80** for pages,
+**70** for sheets. It names the exact field and what it is missing. Full rules
+and the word floors: [prompt-rules.md](prompt-rules.md).
+
+0. **Depth score** — no CHANGE stubs, no filler words, every field over its word
+   floor, every prop carrying a colour plus a material or a state.
 
 1. **Scene depth** — FG + MG + BG + lighting + props, all concrete.
 2. **Place lock** — every page carries the `locationId` its story page declares.
-3. **Text blend** — Arabic inside the art (shared colors/texture/light). Never hard white box.
+3. **Caption room** — text-free art leaves a calm bottom safe zone; `build` adds
+   the exact Arabic later as a real PDF text layer. Never draw a box or caption.
 4. **Multi-persona fidelity** — each on-page person matches **their** photo + outfit; no face swap.
 5. **One orientation** — `composition.orientation` equals the book setting on every asset.
 6. **Copyright-safe guests** — famous characters = detailed visual description only; **never** their real name, Latin or Arabic (`list-guests`).
@@ -44,7 +57,7 @@ Reject thin fills. Expand until a stranger could draw the page from the JSON alo
 - `schemaVersion`
 - `useCase`
 - `style.medium` / `style.finish` — paste from `$TOOLS/references/themes/catalog.json` for `brief.themeId` (same on every page; `immutable: true` = lock after theme chosen, not “always storybook”)
-- `text.direction` + `text.renderingRules` (tune blend wording per theme `textBlendHint`)
+- `composition.captionSafeZone` (tune the quiet-band wording per theme `textSafeZoneHint`)
 - `constraints` list
 - `avoid` list (+ theme `avoidExtras`)
 - `composition.orientation` = the book setting (default `landscape`) — identical on every asset
@@ -55,7 +68,7 @@ Reject thin fills. Expand until a stranger could draw the page from the JSON alo
 2. Load `$TOOLS/references/themes/catalog.json` → that theme.
 3. Paste `style.medium` / `style.finish` into every prompt (sheet + pages).
 4. The compiler pulls the style block from `style.medium` / `style.finish` — just paste them correctly.
-5. Text blend: use theme `textBlendHint` (cartoony = soft 3D-integrated caption, not painterly wash).
+5. Caption band: use theme `textSafeZoneHint` (cartoony = smooth out-of-focus 3D floor, not a painterly wash).
 6. If theme has `styleRefDir` and `input/style/` empty: run `apply-theme --theme <themeId>` (or copy `themes/<id>/ref-*.png`).
 
 | themeId | Fingerprint (must appear in `style.medium`) |
@@ -106,7 +119,8 @@ If story has Spider-Man, Elsa, Batman, etc.:
 1. Run `list-guests` and pick the archetype matching what the family asked for.
 2. `show-guest --guest <key>` → paste `appearanceNotes` **verbatim** into `guests[]` (not `personas`).
 3. Never write the franchise name in any field — Latin or Arabic. `validate-prompts` scans them all.
-4. In-image Arabic may use a kid-friendly alias; the image prompt stays nameless.
+4. The story/PDF caption may use a kid-friendly alias; generated art stays
+   text-free and its prompt stays nameless.
 5. Descriptions under 120 chars are rejected — vagueness is what triggers a refusal.
 
 Library: `$TOOLS/references/guests/catalog.json`. Rules: `$TOOLS/references/copyright-safe-guests.md`.
@@ -135,11 +149,12 @@ Both bad forms are rejected by `validate-prompts`, and both would be refused by 
 | `spatialStaging` | multi-person layout |
 | `scene.*` | full place description (all layers) |
 | `actionAndEmotion.*` | pose + feeling per person |
-| `composition.shotScale` | must differ from adjacent |
-| `composition.viewpoint` | must differ from adjacent |
-| `composition.textIntegration.placement` | must differ from adjacent |
-| `composition.textIntegration.blendMode` / `surface` | how text sits in art |
-| `text.verbatimArabic` | exact `story.json` page text |
+| `composition.shotScale` | must differ from adjacent — **enforced**: two adjacent pages sharing scale *and* viewpoint fail validation |
+| `composition.viewpoint` | must differ from adjacent — see above |
+| `composition.lens` | lens feel, e.g. `35mm-equivalent, slight wide, no edge distortion` |
+| `composition.depthOfField` | what stays sharp, what falls soft |
+| `colorScript` | how this beat leans the locked palette — never a new palette |
+| `composition.captionSafeZone` | how the reserved quiet band reads in this theme |
 | `continuity.fromPreviousPage` | carried state per returning person |
 | `locationId` | which location-sheet gets attached as a reference |
 
@@ -160,10 +175,17 @@ Both bad forms are rejected by `validate-prompts`, and both would be refused by 
 **Good:** layered porch / doorway / street with materials  
 **Bad:** `backdropDetails: home doorway morning light`
 
-## Text blend rules
+## Caption safe-zone rules
 
-Do: theme `textBlendHint` — storybook soft painted caption / sky wash; cartoony soft 3D-integrated caption band; quiet zone off faces.  
-Do not: white boxes, stickers, speech bubbles (unless asked), tiny/cropped/mirrored/Latin.
+The Arabic is **not** in the image. `build` draws it as a real PDF text layer,
+so the art only has to leave room for it.
+
+Do: keep the bottom band calm and low-detail per the theme's `textSafeZoneHint`
+— no faces, hands, or key action there.
+Do not: any text, letters, numbers, captions, or signage anywhere in the frame;
+any drawn box, band, or panel under the caption area. `validate-prompts` fails a
+page prompt that omits the text-free clause, or that pastes the story text into
+the art prompt.
 
 ## `compiledPrompt` assembly (done for you)
 
@@ -177,9 +199,9 @@ important sections first if it runs long:
 5. guest descriptions
 6. setting (place / time / lighting), then FG / MG / BG layers, then props
 7. style block from the theme catalog
-8. composition
-9. **Arabic text block** — exact string, RTL, blend rules
-10. palette, carried continuity
+8. composition — scale, viewpoint, focal hierarchy, lens, depth of field
+9. **text-free clause** — the art carries no text at all; the caption is a PDF layer
+10. palette, colour script, carried continuity
 11. avoid list
 
 Sections 1, 2, 3, 4, 6-setting, 7 and 9 are never dropped. The avoid list goes

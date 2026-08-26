@@ -1,5 +1,12 @@
 # Style lock (quality target)
 
+> **Handoff §9 binds the palette.** Whatever theme is selected, the colours must
+> stay print-safe on coated stock: 15–20% below default saturation, no pure
+> black fills, no full-bleed deep navy, night around `#2C3E50`, no neon. The
+> print-safe clause is compiled into every prompt automatically — the theme
+> chooses the *look*, not permission to ignore it. And the palette is picked per
+> story from that story's world, never reused as a house template (§9 P11).
+
 Art look comes from **`brief.themeId`** → [`themes/catalog.json`](themes/catalog.json).
 
 ## Orientation lock (before anything else)
@@ -20,7 +27,9 @@ which is what made pages look subtly wrong next to each other.
 Run `list-themes` for the full catalog — it is the source of truth and grows
 over time. Every entry defines `style.medium` / `style.finish` (paste verbatim
 into each prompt), a `fingerprint` that must appear in `style.medium`, and a
-`textBlendHint` describing how the Arabic should sit in that medium.
+`textSafeZoneHint` describing how the reserved caption band should look in that
+medium — the band stays empty in the art, because the Arabic is drawn later as
+a PDF text layer.
 
 Apply with:
 

@@ -1,10 +1,20 @@
 # story.json (client `input/story.json`)
 
-Exactly `pageCount` pages. Example for 20:
+Exactly `pageCount` pages. Handoff §7 fixes that at **24**:
 
-ids in order: `cover`, `page-01` … `page-18`, `back-cover`.
+| Order | id | Role |
+|---|---|---|
+| — | `cover` | front cover, outside the 22 interior pages |
+| 1 | `page-01` | الإهداء — doctrine-owned text |
+| 2–21 | `page-02` … `page-21` | the story — **exactly 20 pages** |
+| 22 | `page-22` | «قصص تانية» — doctrine-owned layout |
+| — | `back-cover` | back cover — doctrine-owned marketing copy |
 
-For other N: `cover`, `page-01` … `page-(N-2)`, `back-cover`.
+`bookStructure` is `"hekayati-22"`. Write the three fixed pages with
+`apply-fixed-pages`; editing their text by hand is a blocking error. They carry
+`"fixedByDoctrine": true`, sit outside the age word budget and the Egyptian
+register check, and the dedication and «قصص تانية» sit outside `narrativeArc`
+too. The back cover keeps its `resolution` stage.
 
 ```json
 {
@@ -15,7 +25,14 @@ For other N: `cover`, `page-01` … `page-(N-2)`, `back-cover`.
   "themeId": "storybook",
   "visualStyle": "premium whimsical children's storybook digital illustration, magical realism, cinematic lighting",
   "purpose": "adventure",
-  "pageCount": 20,
+  "storyType": "C",
+  "bookStructure": "hekayati-22",
+  "storyGoal": {
+    "mode": "entertainment",
+    "goalAr": "يساعد حارس خيوط مقنّع ينقذ مدينة الفوانيس",
+    "updatedAt": "2026-07-25T12:00:00+00:00"
+  },
+  "pageCount": 24,
   "outline": "user outline",
   "templateSelection": null,
   "customizationNote": null,
@@ -54,25 +71,25 @@ For other N: `cover`, `page-01` … `page-(N-2)`, `back-cover`.
     "avoid": ["identity swap between personas"]
   },
   "narrativeArc": {
-    "setup": ["page-01", "page-02"],
-    "disruption": ["page-03"],
-    "goal": ["page-04", "page-05"],
-    "attempts": ["page-06", "page-07", "page-08", "page-09", "page-10"],
-    "setback": ["page-11", "page-12"],
-    "clue": ["page-13"],
-    "choice": ["page-14"],
-    "decisiveAction": ["page-15", "page-16", "page-17"],
-    "payoff": ["page-18"],
+    "setup": ["page-02", "page-03"],
+    "disruption": ["page-04"],
+    "goal": ["page-05", "page-06"],
+    "attempts": ["page-07", "page-08", "page-09", "page-10", "page-11"],
+    "setback": ["page-12", "page-13"],
+    "clue": ["page-14"],
+    "choice": ["page-15"],
+    "decisiveAction": ["page-16", "page-17", "page-18"],
+    "payoff": ["page-19", "page-20", "page-21"],
     "resolution": ["back-cover"]
   },
   "refrainPhrases": ["هنجرب تاني!"],
   "personalization": {
     "habitFocus": { "personaId": "persona-01", "habitAr": "…", "type": "reduce", "targetBehaviorAr": "…" },
     "habitArc": {
-      "setup": ["page-02"],
-      "challenge": ["page-05"],
-      "turn": ["page-11"],
-      "reinforce": ["page-15", "page-17"]
+      "setup": ["page-03"],
+      "challenge": ["page-06"],
+      "turn": ["page-12"],
+      "reinforce": ["page-16", "page-18"]
     },
     "requestCoverage": {
       "req-01": { "pages": ["page-03"], "locationId": "grandma-house" },
@@ -99,6 +116,43 @@ For other N: `cover`, `page-01` … `page-(N-2)`, `back-cover`.
   ]
 }
 ```
+
+## Story type (required — handoff §5)
+
+`"storyType"` is `"A"`, `"B"`, or `"C"`. Set it with `set-story-type`; it must
+agree with `storyGoal.mode`.
+
+| Type | Meaning | mode | Enforced |
+|---|---|---|---|
+| `A` | تصحيح سلوك داخلي | `educational` | needs a guest companion **and** a `setback` stage |
+| `B` | تشجيع على مكان | `educational` | rejects any guest companion |
+| `C` | مغامرة خيالية | `entertainment` | original guests only |
+
+Personas may carry `"gender": "boy"` or `"girl"`. When the hero declares one,
+every persona with `"role": "friend"` must match it (handoff §4 C1).
+
+## Story goal (required)
+
+Choose this before plot selection with `set-story-goal`. `brief.json`,
+`story.json`, and `book.json` must agree.
+
+```json
+{
+  "storyGoal": {
+    "mode": "educational",
+    "goalAr": "يتعلم يجهز شنطته وينزل المدرسة في ميعاده",
+    "updatedAt": "2026-07-25T12:00:00+00:00"
+  }
+}
+```
+
+- `educational`: demonstrate a value or a drawable replacement behaviour
+  through pattern/temptation → cost → child-owned choice → later proof.
+- `entertainment`: fulfill a fantasy promise through invitation → escalating
+  obstacles → child-owned hero moment → ending payoff.
+- `habitFocus` is valid only with `educational`.
+- A template's `storyIntent` must equal `storyGoal.mode`.
+- `goalAr` is a testable story promise, not a vague genre label.
 
 ## Exact age language profile (required)
 
@@ -227,6 +281,7 @@ real persona ids, copies original guests, and records provenance:
     "templateId": "thread-guardian-lantern-city",
     "titleAr": "عبدالله وحارس الخيوط في مدينة الفوانيس",
     "catalogVersion": 2,
+    "storyIntent": "entertainment",
     "appliedAt": "2026-07-17T12:00:00+00:00",
     "customizationNote": null,
     "targetAge": 5,
@@ -246,7 +301,7 @@ Template catalog source:
 the workflow gate and provenance are mirrored across `input/story.json`,
 `input/brief.json`, and `output/book.json`. If any selection exists, all three
 must contain `templateSelection`, and these fields must match exactly:
-`templateId`, `titleAr`, `catalogVersion`, `appliedAt`, `customizationNote`,
+`templateId`, `titleAr`, `catalogVersion`, `storyIntent`, `appliedAt`, `customizationNote`,
 `targetAge`, `sourceLanguageProfileId`, `targetLanguageProfileId`,
 `requiresAgeAdaptation`, `requiresRevision`, `ageAdaptedAt`, and `customizedAt`.
 Do not hand-edit gate fields; use the template workflow commands. Page prose
@@ -279,7 +334,7 @@ When writing prompts, paste that theme’s `style.medium` / `style.finish` into 
 
 | Field | Required when | Rule |
 |---|---|---|
-| `habitArc` | `habitFocus` is set | `setup` → `challenge` → `turn` → `reinforce`, strictly in page order, ≥4 pages, never the cover, hero present on every arc page |
+| `habitArc` | `habitFocus` is set | Educational stories only. `setup` → `challenge` → `turn` → `reinforce`, strictly in page order, ≥4 pages, never the cover, hero present on every arc page. Exact `targetBehaviorAr` appears in visible `text`, `beat`, or `action` on at least one `turn` and one `reinforce` page. |
 | `requestCoverage` | any `required` request | Real page ids per request; `place` needs a matching `locationId`; required `thing` must be in `continuity.recurringProps` |
 
 The `turn` stage is the child's own decision. An adult or a magic fix there is
@@ -292,8 +347,9 @@ Details and interview wording: `personalization.md`.
 - `participants` = exact persona ids on that page (subset OK).
 - Never list a persona who is off-camera.
 - Cover / climax / back cover often include everyone; quiet beats may be solo.
-- Each page `text` is in-image Arabic. Use the selected age profile; there is no
-  single word cap shared by ages 1–8.
+- Each page `text` is the Arabic caption later rendered as a real PDF text
+  layer. Use the selected age profile; there is no single word cap shared by
+  ages 1–8.
 - Pipeline passes **only on-page persona photos** + character-sheet as image refs.
 
 ## Famous / franchise guests

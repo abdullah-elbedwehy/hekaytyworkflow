@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 1,
+  "note": "Value taxonomy every ready-made story template binds to. A template declares one valueId; the story must PROVE it through a costed choice, never state it. Values are ordinary Islamic child-rearing values expressed in plain Egyptian Arabic — no Quran or hadith text belongs in a page.",
+  "values": {
+    "sidq": {
+      "valueId": "sidq",
+      "labelAr": "الصدق",
+      "labelEn": "honesty",
+      "lessonAr": "اللي بيقول الحق بيخرج من الموقف أحسن",
+      "antiPatternAr": "كذبة صغيرة عشان يهرب من موقف صعب",
+      "provenByAr": "البطل بيقول الحق وهو خايف، والحقيقة هي اللي بتحل الموقف"
+    },
+    "amana": {
+      "valueId": "amana",
+      "labelAr": "الأمانة",
+      "labelEn": "trustworthiness",
+      "lessonAr": "اللي مش بتاعك بيرجع لصاحبه",
+      "antiPatternAr": "ياخد حاجة لقاها ويقول محدش شافني",
+      "provenByAr": "البطل بيرجّع حاجة كان نفسه فيها وهو قادر ياخدها"
+    },
+    "rahma": {
+      "valueId": "rahma",
+      "labelAr": "الرحمة",
+      "labelEn": "mercy and kindness",
+      "lessonAr": "الرحمة بتوصل لأصغر مخلوق",
+      "antiPatternAr": "يعدّي على حد محتاج وهو شايفه",
+      "provenByAr": "البطل بيتعب نفسه عشان يساعد كائن أضعف منه"
+    },
+    "taawun": {
+      "valueId": "taawun",
+      "labelAr": "التعاون",
+      "labelEn": "cooperation",
+      "lessonAr": "اللي مايتعملش لوحدنا بيتعمل مع بعض",
+      "antiPatternAr": "كل واحد يجرّب لوحده ويزعل من التاني",
+      "provenByAr": "المحاولات الفردية بتفشل، والحل بيظهر لما يمسكوا في إيد بعض"
+    },
+    "birr-walidayn": {
+      "valueId": "birr-walidayn",
+      "labelAr": "سماع كلام الأهل",
+      "labelEn": "listening to parents",
+      "lessonAr": "نصيحة الأم بتحمي حتى لما متكونش مفهومة",
+      "antiPatternAr": "يسيب نصيحة أمه عشان كلام حلو من غريب",
+      "provenByAr": "البطل بيتذكر النصيحة في اللحظة الصح وبتنقذه"
+    },
+    "karam": {
+      "valueId": "karam",
+      "labelAr": "الكرم",
+      "labelEn": "generosity",
+      "lessonAr": "اللي بيدّي وهو مش فاضل معاه كتير، بيلاقي",
+      "antiPatternAr": "يخبّي اللي معاه عن جاره المحتاج",
+      "provenByAr": "البطل بيدّي من حاجته هو، مش من الزيادة"
+    },
+    "ihsan-lil-musee": {
+      "valueId": "ihsan-lil-musee",
+      "labelAr": "مقابلة الإساءة بالإحسان",
+      "labelEn": "answering unkindness with kindness",
+      "lessonAr": "الرد الحلو بيكسّر الزعل",
+      "antiPatternAr": "يرد الإساءة بإساءة زيها",
+      "provenByAr": "البطل بيساعد اللي رفض يساعده، وهو فاكر كويس اللي حصل"
+    },
+    "taqdir-amal-alghayr": {
+      "valueId": "taqdir-amal-alghayr",
+      "labelAr": "تقدير تعب الناس",
+      "labelEn": "valuing other people's work",
+      "lessonAr": "أي حاجة بسيطة وراها تعب حد",
+      "antiPatternAr": "يستهون بشغل حد ويرميه",
+      "provenByAr": "البطل بيجرّب الشغلانة بنفسه ويكتشف تعبها"
+    },
+    "nashat": {
+      "valueId": "nashat",
+      "labelAr": "النشاط",
+      "labelEn": "diligence over laziness",
+      "lessonAr": "الشغل بيخف لما نبدأ، مش لما نستنى",
+      "antiPatternAr": "يأجل شغله ويسيبه على غيره",
+      "provenByAr": "الكسل بيرجع على صاحبه بنتيجة بيشوفها بعينه"
+    },
+    "fitna-hidhr": {
+      "valueId": "fitna-hidhr",
+      "labelAr": "الانتباه والفطنة",
+      "labelEn": "alertness",
+      "lessonAr": "اللي بيبص كويس بيشوف اللي مخبّي",
+      "antiPatternAr": "ياخد كلام حلو على ظاهره من غير ما يتأكد",
+      "provenByAr": "البطل بيلاحظ تفصيلة صغيرة بتكشف الخدعة"
+    },
+    "tawadu": {
+      "valueId": "tawadu",
+      "labelAr": "التواضع",
+      "labelEn": "humility",
+      "lessonAr": "الجمال والقوة مش سبب إن حد يعلى على حد",
+      "antiPatternAr": "يفتخر بنفسه ويقلل من اللي حواليه",
+      "provenByAr": "الغرور بيوقّع صاحبه في موقف بيتعلم منه قدام الكل"
+    },
+    "shukr-alniema": {
+      "valueId": "shukr-alniema",
+      "labelAr": "شكر النعمة",
+      "labelEn": "gratitude",
+      "lessonAr": "اللي بين إيدينا نعمة تستاهل شكر",
+      "antiPatternAr": "يزهق من حاجة كويسة عشان مش عاجباه شكلها",
+      "provenByAr": "البطل بيفتقد الحاجة أو يشوف تعبها فيتغير رأيه"
+    },
+    "kaff-alaza": {
+      "valueId": "kaff-alaza",
+      "labelAr": "عدم إيذاء الناس",
+      "labelEn": "not harming others",
+      "lessonAr": "اللي بيحفر لحد بيقع فيها",
+      "antiPatternAr": "يعمل مقلب بيوجع صاحبه ويضحك",
+      "provenByAr": "البطل بيقع في نفس اللي عمله وبيصلّحه بإيده"
+    },
+    "ithar": {
+      "valueId": "ithar",
+      "labelAr": "الإيثار",
+      "labelEn": "putting others first",
+      "lessonAr": "الفرحة بتكبر لما نديها لحد تاني",
+      "antiPatternAr": "يمسك حاجته وهو شايف حد محتاجها أكتر",
+      "provenByAr": "البطل بيسيب حاجة نفسه فيها فعلًا لحد محتاج"
+    },
+    "dabt-alghadab": {
+      "valueId": "dabt-alghadab",
+      "labelAr": "التحكم في الغضب",
+      "labelEn": "managing anger",
+      "lessonAr": "الزعل بيروح، والكلام الوحش بيفضل",
+      "antiPatternAr": "يزعق ويخطف وينده بأسامي وحشة أول ما يزعل",
+      "provenByAr": "البطل بيمسك نفسه مرة واحدة وبيشوف الفرق بنفسه"
+    },
+    "afw": {
+      "valueId": "afw",
+      "labelAr": "العفو",
+      "labelEn": "forgiveness",
+      "lessonAr": "اللي بيسامح وهو قادر، بيكسب صاحب",
+      "antiPatternAr": "يعاقب حد ضعيف عشان يقدر",
+      "provenByAr": "البطل بيسيب اللي غلط عليه، واللي سامحه بيرجع ينفعه"
+    },
+    "ihsan-lilyateem": {
+      "valueId": "ihsan-lilyateem",
+      "labelAr": "الإحسان لليتيم",
+      "labelEn": "kindness to orphans",
+      "lessonAr": "الخير اللي بنعمله مابيضيعش",
+      "antiPatternAr": "يتلهى عن طفل محتاج وهو قادر يساعده",
+      "provenByAr": "الخير اللي اتعمل من زمان بيرجع في اللحظة الصعبة"
+    },
+    "qanaa": {
+      "valueId": "qanaa",
+      "labelAr": "القناعة",
+      "labelEn": "contentment",
+      "lessonAr": "أحسن حاجة ممكن تكون تحت رجلينا",
+      "antiPatternAr": "يسيب اللي في إيده ويجري ورا اللي في إيد غيره",
+      "provenByAr": "البطل بيلف بعيد وبيرجع يلاقي الخير في مكانه الأول"
+    }
+  }
+}
