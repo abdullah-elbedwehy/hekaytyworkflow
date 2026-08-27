@@ -1,0 +1,265 @@
+/* Rawy — one calm operator surface. Core Obsidian only, no community plugins. */
+
+@font-face {
+  font-family: "Rawy Cairo";
+  src: url("../../../tools/references/fonts/Cairo-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  --rawy-bg: #141414;
+  --rawy-surface: #1c1c1c;
+  --rawy-raised: #242424;
+  --rawy-border: #2e2e2e;
+  --rawy-text: #e8e8e8;
+  --rawy-muted: #8c8c8c;
+  --rawy-accent: #82a4c9;
+  --rawy-danger: #c75c5c;
+  --rawy-radius: 14px;
+}
+
+.theme-light {
+  --rawy-bg: #f7f7f5;
+  --rawy-surface: #ffffff;
+  --rawy-raised: #ffffff;
+  --rawy-border: #e2e2de;
+  --rawy-text: #1a1a1a;
+  --rawy-muted: #6b6b6b;
+  --rawy-accent: #3d6bb3;
+}
+
+body {
+  --background-primary: var(--rawy-bg);
+  --background-primary-alt: var(--rawy-surface);
+  --background-secondary: var(--rawy-bg);
+  --background-secondary-alt: var(--rawy-bg);
+  --text-normal: var(--rawy-text);
+  --text-muted: var(--rawy-muted);
+  --text-accent: var(--rawy-accent);
+  --interactive-accent: var(--rawy-accent);
+  --divider-color: var(--rawy-border);
+  font-family: "Rawy Cairo", "SF Arabic", sans-serif;
+}
+
+/*
+  Arabic notes read RTL. Vault-level RTL flips Obsidian's file explorer and
+  makes the tree jump when folders open — keep app.json rightToLeft false and
+  scope direction here only. Never style .workspace, .nav-files-container, or
+  .workspace-split.
+*/
+.rawy-dashboard,
+.rawy-client,
+.rawy-gallery {
+  direction: rtl;
+}
+
+/* ---------- Dashboard ---------- */
+
+.rawy-dashboard > .markdown-preview-sizer,
+.rawy-dashboard > .cm-editor > .cm-scroller > .cm-sizer {
+  max-width: 1120px;
+  padding-inline: clamp(20px, 4vw, 56px);
+  padding-bottom: 64px;
+}
+
+.rawy-dashboard > .markdown-preview-sizer > .mod-header {
+  display: none;
+}
+
+.rawy-dashboard h1 {
+  font-size: clamp(2.6rem, 6vw, 4.8rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-block: 40px 8px;
+}
+
+.rawy-dashboard h2 {
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  line-height: 1.35;
+  margin-block: 40px 14px;
+}
+
+/* Action links rendered as buttons. */
+.callout[data-callout="rawy-actions"] {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-block: 18px 8px;
+}
+
+.callout[data-callout="rawy-actions"] .callout-title {
+  display: none;
+}
+
+.callout[data-callout="rawy-actions"] .callout-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.callout[data-callout="rawy-actions"] p {
+  display: contents;
+}
+
+.callout[data-callout="rawy-actions"] a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding-inline: 18px;
+  border: 1px solid var(--rawy-border);
+  border-radius: 12px;
+  background: var(--rawy-raised);
+  color: var(--rawy-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.callout[data-callout="rawy-actions"] a:hover {
+  border-color: var(--rawy-accent);
+  color: var(--rawy-accent);
+}
+
+/* Embedded base views must fill the note width. */
+.rawy-dashboard .internal-embed,
+.rawy-dashboard .cm-embed-block {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.rawy-dashboard .bases-embed,
+.rawy-dashboard .bases-view {
+  min-height: 0;
+}
+
+/* Embedded tables are a read-out, not an editor: hide the per-view toolbar so the
+   dashboard stays two lists. The full toolbar is still there in Clients.base. */
+.rawy-dashboard .internal-embed .bases-toolbar {
+  display: none;
+}
+
+.rawy-dashboard .bases-view {
+  width: 100%;
+  min-width: 0;
+  overflow: auto;
+  background: var(--rawy-surface);
+  border: 1px solid var(--rawy-border);
+  border-radius: var(--rawy-radius);
+}
+
+/* ---------- Client note ---------- */
+
+.rawy-client > .markdown-preview-sizer,
+.rawy-client > .cm-editor > .cm-scroller > .cm-sizer {
+  max-width: 860px;
+}
+
+.rawy-client > .markdown-preview-sizer > .mod-header {
+  display: none;
+}
+
+.rawy-client .callout {
+  border: 1px solid var(--rawy-border);
+  border-radius: var(--rawy-radius);
+  box-shadow: none;
+}
+
+.rawy-client .callout-icon {
+  display: none;
+}
+
+.rawy-client .callout[data-callout="rawy-progress"] {
+  background: var(--rawy-raised);
+  color: var(--rawy-text);
+}
+
+.rawy-client .callout[data-callout="rawy-action"] {
+  background: color-mix(in srgb, var(--rawy-accent) 14%, var(--rawy-surface));
+  color: var(--rawy-text);
+}
+
+.rawy-client .callout[data-callout="rawy-blocker"] {
+  background: color-mix(in srgb, var(--rawy-danger) 16%, var(--rawy-surface));
+  color: var(--rawy-text);
+}
+
+/* ---------- Client gallery ---------- */
+
+/* The per-image comment box. Muted when empty so the page reads as a gallery;
+   it only earns attention once the operator has written in it. */
+.rawy-gallery .callout[data-callout="rawy-note"] {
+  border: 1px dashed var(--rawy-border);
+  border-radius: var(--rawy-radius);
+  background: transparent;
+  box-shadow: none;
+  margin-block: 8px 4px;
+}
+
+.rawy-gallery .callout[data-callout="rawy-note"] .callout-icon {
+  display: none;
+}
+
+.rawy-gallery .callout[data-callout="rawy-note"] .callout-title {
+  font-size: 0.82rem;
+  color: var(--rawy-muted);
+}
+
+/* Expanded means something was written — make that visible while scrolling. */
+.rawy-gallery .callout[data-callout="rawy-note"]:not(.is-collapsed) {
+  border-style: solid;
+  border-color: var(--rawy-danger);
+  background: color-mix(in srgb, var(--rawy-danger) 10%, var(--rawy-surface));
+}
+
+.rawy-gallery .callout[data-callout="rawy-note"]:not(.is-collapsed) .callout-title {
+  color: var(--rawy-text);
+}
+
+
+.rawy-gallery > .markdown-preview-sizer,
+.rawy-gallery > .cm-editor > .cm-scroller > .cm-sizer {
+  max-width: 1120px;
+  padding-inline: clamp(20px, 4vw, 48px);
+  padding-bottom: 64px;
+}
+
+.rawy-gallery > .markdown-preview-sizer > .mod-header {
+  display: none;
+}
+
+.rawy-gallery h2 {
+  margin-block: 36px 6px;
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
+}
+
+/* The asset id is a label on the image, not a heading in its own right. */
+.rawy-gallery h3 {
+  margin-block: 22px 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rawy-muted);
+  text-transform: none;
+  direction: ltr;
+  text-align: left;
+}
+
+.rawy-gallery .internal-embed img,
+.rawy-gallery img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--rawy-border);
+  border-radius: var(--rawy-radius);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

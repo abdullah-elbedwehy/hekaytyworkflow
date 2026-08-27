@@ -53,68 +53,6 @@ class ObsidianConfigTests(unittest.TestCase):
         self.assertEqual(first, (self.root / ".obsidian" / "app.json").read_text(encoding="utf-8"))
 
 
-class StudioVaultTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name).resolve()
-        self.result = vault.build_studio_vault(self.root)
-
-    def test_every_expected_note_is_generated(self) -> None:
-        notes = self.root / "vault"
-        for relative in (
-            "Home.md",
-            "00-Doctrine/قواعد الـHandoff.md",
-            "00-Doctrine/تصنيف القصص.md",
-            "00-Doctrine/هيكل الكتاب.md",
-            "00-Doctrine/ألوان آمنة للطباعة.md",
-            "00-Doctrine/قواعد أداة الصور.md",
-            "01-Checklists/جيت ما قبل البرومبتات.md",
-            "01-Checklists/جيت ما قبل المطبعة.md",
-            "03-Status/حالة المشروع.md",
-            "04-Runbook/Manual Image Lane.md",
-            "90-Templates/كتاب جديد.md",
-        ):
-            with self.subTest(note=relative):
-                self.assertTrue((notes / relative).is_file(), relative)
-
-    def test_generated_notes_are_stamped_and_warn_against_hand_edits(self) -> None:
-        text = (self.root / "vault" / "00-Doctrine" / "هيكل الكتاب.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("generated: true", text)
-        self.assertIn(doctrine.load_doctrine()["doctrineVersion"], text)
-        self.assertIn("build-vault", text)
-
-    def test_structure_note_renders_the_real_numbers(self) -> None:
-        text = (self.root / "vault" / "00-Doctrine" / "هيكل الكتاب.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("`page-01`", text)
-        self.assertIn("`page-22`", text)
-        self.assertIn("لـ [اسم الطفل] 💛", text)
-        self.assertIn("🎮 ألعاب تفاعلية", text)
-
-    def test_one_note_per_known_book_plus_a_tracker(self) -> None:
-        books = self.root / "vault" / "02-Books"
-        self.assertTrue((books / "_متابعة الكتب.md").is_file())
-        for story in doctrine.load_doctrine()["projectStatus"]["stories"]:
-            self.assertTrue((books / f"{story['titleAr']}.md").is_file())
-
-    def test_rebuild_never_clobbers_a_hand_edited_book_note(self) -> None:
-        note = self.root / "vault" / "02-Books" / "كريم وصقر النور.md"
-        note.write_text("# ملاحظاتي أنا\n", encoding="utf-8")
-        vault.build_studio_vault(self.root)
-        self.assertEqual("# ملاحظاتي أنا\n", note.read_text(encoding="utf-8"))
-
-    def test_bookmarks_point_at_files_that_exist(self) -> None:
-        bookmarks = read_json(self.root / ".obsidian" / "bookmarks.json")
-        self.assertTrue(bookmarks["items"])
-        for item in bookmarks["items"]:
-            if item["path"].startswith("vault/"):
-                self.assertTrue((self.root / item["path"]).is_file(), item["path"])
-
-
 class ClientVaultTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

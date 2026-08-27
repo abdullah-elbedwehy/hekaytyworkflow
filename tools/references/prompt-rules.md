@@ -6,9 +6,11 @@ enforced by the reviewers. A prompt that clears this bar renders right the first
 time, and first-time-right is the entire speed strategy — a regenerated page
 costs more than an hour of careful writing.
 
-Read with: [prompt-fill-guide.md](prompt-fill-guide.md) (which field goes where)
-and [agent-core.md](agent-core.md) (routing and parallel rules). The rulebook
-above all of them is [handoff.md](handoff.md).
+Read with: [prompt-fill-guide.md](prompt-fill-guide.md) (which field goes where),
+[prompt-targets.md](prompt-targets.md) (how the same fields are phrased for each
+image tool) and [workflow/routing.md](workflow/routing.md) (routing and parallel
+rules). The
+rulebook above all of them is [handoff.md](handoff.md).
 
 ---
 
@@ -183,19 +185,39 @@ appear across several pages and what condition each is in right now.
 
 ---
 
-## Rule 8 — text never enters the art
+## Rule 8 — the text is drawn inside the picture
 
-The Arabic is **not** painted into the illustration. `build` draws it as a real
-PDF text layer, so:
+The image model renders the Arabic itself, as part of the artwork. So:
 
-- Every page prompt carries the text-free clause (the compiler adds it).
-- The bottom band stays calm and low-detail — no faces, hands, or key action.
-- No drawn box, band, or panel under the caption area.
-- The story text must never appear anywhere in `compiledPrompt`.
+- `inImageText` carries the page's approved Arabic, character for character.
+- `textSurface` names the thing it is printed on — pinned note, cloth banner,
+  wooden sign, windowsill, chalkboard.
+- No caption band, strip, panel, or scrim over the art — that mode is removed.
+- A reference sheet has empty `inImageText` and comes back wordless.
 
-All four are enforced. The reason the ban is total rather than "no caption": an
-image model given any excuse to draw a sign, a poster, or a book cover will
-render malformed Arabic on it.
+All four are enforced. `validate-prompts` and `begin-asset` both refuse a prompt
+whose `inImageText` drifted from the approved story text: a reworded page prints
+a book nobody signed off on.
+
+Arabic from an image model fails in specific ways — mirrored, letters
+disconnected, words invented, copy running off the surface. Regenerate; never
+accept a page whose Arabic is not exactly the approved string.
+
+## Rule 8b — a game page must be playable
+
+Declare `gameSpec.kind` as `maze`, `spot-the-difference`, or `search-and-find`,
+and write every element and its position into `gameSpec.elements` yourself. A
+model left to invent them draws a maze with three exits.
+
+- `maze` — needs `startDescription` + `goalDescription`. Exactly one open route.
+- `spot-the-difference` — needs `differenceCount` + `differences`, and the count
+  must equal the number listed.
+- `search-and-find` — needs `targetItems` with exact quantities.
+
+Never draw the answer: mark start and goal, never the winning path; never circle
+or number a difference or a target. The instruction text goes inside the image on
+a surface that suits a game page. See [workflow/prompts.md](workflow/prompts.md)
+for the full section.
 
 ---
 
@@ -221,7 +243,50 @@ wrong at once, instead of surfacing one failure per round trip.
 
 ---
 
+## Rule 11 — say what must be TRUE, not what to avoid
+
+`avoid` is still where you list what must not happen, but the compiler no
+longer passes it through as a negation list. `Avoid: malformed hands, brand
+logos` mostly tells an image model that hands and logos belong in this picture;
+what it acts on is the positive form — *hands are anatomically correct, five
+fingers each, fully drawn*. `compile-prompts` rewrites every known entry and
+keeps the rest as a short ban list.
+
+What that means for you: write `avoid` entries that **have** a positive form. A
+new entry with no rewrite in `prompt_targets.POSITIVE_REWRITES` survives as a
+raw ban, which is weaker. If you add one that will recur, add its rewrite too.
+
+The same rule applies to the fields themselves. `no clutter` is not a
+description; `three objects on the table and nothing else` is.
+
+## Rule 12 — one page, two image tools
+
+`compile-prompts` writes a render per target into `compiledPrompts`: a labelled
+one for ChatGPT and a narrative one for Nano Banana Pro. You never write either
+by hand, and you never write per-tool fields — both renders read the same JSON,
+so anything you leave out is missing from both.
+
+`validate-prompts` checks the binding clauses on **every** render. A page that
+is print-safe in one tool and not the other is a reprint waiting to happen.
+Details and how to add a target: [prompt-targets.md](prompt-targets.md).
+
+## Rule 13 — the pipeline refuses rather than degrades
+
+`validate-prompts` blocks on a thin prompt instead of compiling a vague one,
+and it names every failing field at once. That is deliberate: a prompt that is
+80% filled produces art that is 100% finished and wrong, and the cost lands on
+a regeneration hours later. When it blocks, fill the field it names. Do not
+lower `--min-depth` to get past it.
+
 ## Self-check before you hand the folder over
+
+Before the mechanical checklist, do the audit pass on your own work: **find the
+three weakest fields in this prompt.** For each, say what a stranger would have
+to invent, and what the picture would look like if they invented it wrong. If
+you cannot find three real ones, say so — do not manufacture a fourth. The
+weakest fields are where the regeneration comes from, and `validate-prompts`
+prints its own three-weakest list on success so you can compare.
+
 
 - [ ] Every field passes the stranger test.
 - [ ] Zero banned words, English and Arabic.
@@ -231,4 +296,6 @@ wrong at once, instead of surfacing one failure per round trip.
 - [ ] No two adjacent pages share scale **and** viewpoint.
 - [ ] `continuity.fromPreviousPage` is filled from `page-02` on.
 - [ ] `lens`, `depthOfField`, `colorScript` filled on every page.
+- [ ] Every `avoid` entry has a positive form, or is a real ban.
+- [ ] `compiledPrompts` holds a render for every target.
 - [ ] `preflight` returns `ok: true`.

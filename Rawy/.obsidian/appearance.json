@@ -1,0 +1,12 @@
+{
+  "theme": "obsidian",
+  "baseFontSize": 17,
+  "textFontFamily": "Rawy Cairo",
+  "monospaceFontFamily": "SFMono-Regular",
+  "cssTheme": "",
+  "accentColor": "#82a4c9",
+  "showViewHeader": true,
+  "enabledCssSnippets": [
+    "rawy"
+  ]
+}

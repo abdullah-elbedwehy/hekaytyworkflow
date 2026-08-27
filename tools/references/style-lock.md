@@ -27,9 +27,10 @@ which is what made pages look subtly wrong next to each other.
 Run `list-themes` for the full catalog — it is the source of truth and grows
 over time. Every entry defines `style.medium` / `style.finish` (paste verbatim
 into each prompt), a `fingerprint` that must appear in `style.medium`, and a
-`textSafeZoneHint` describing how the reserved caption band should look in that
-medium — the band stays empty in the art, because the Arabic is drawn later as
-a PDF text layer.
+`textCarrierHint` describing, in that medium's material language, the in-scene
+surface the page's Arabic is printed on and how the lettering should sit on it.
+The model draws the words there itself, so the copy belongs to the room: it takes
+that surface's angle, its light, and the theme's own hand.
 
 Apply with:
 

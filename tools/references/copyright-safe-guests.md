@@ -45,9 +45,9 @@ In **every** image prompt (`compiledPrompt`, `guests.*.appearanceNotes`, scene t
 - **Never** write the character’s real name, nickname, or franchise title  
 - **Never** write logos, trademarks, or “official costume of …”
 
-Story Arabic in `story.json` may use an original kid-friendly alias, while the
-illustration prompt stays franchise-free. The image itself stays text-free; the
-Arabic caption is added later by the PDF builder.
+Story Arabic in `story.json` may use an original kid-friendly alias, and the image
+model will draw that alias on the page's text surface. The illustration *prompt*
+stays franchise-free: the guest is only ever described, never named.
 
 ## How to write guests
 

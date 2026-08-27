@@ -3,7 +3,9 @@
 Personalized books may contain children’s names, likenesses, family details,
 and generated media. Treat every client project as private data.
 
-- Keep client folders outside the workflow repository.
+- Keep client folders only in the Git-ignored `Rawy/Clients/<slug>/` tree. An
+  external private folder remains supported for compatibility, but no other
+  repository path is allowed.
 - Never commit `personas/`, `input/`, `output/`, `clients/`, credentials, or
   source-book corpora.
 - Obtain guardian consent and the right to use every supplied photo before any
@@ -18,4 +20,3 @@ and generated media. Treat every client project as private data.
 
 Report a suspected vulnerability privately to the repository owner. Do not put
 real child data or credentials in a public issue.
-

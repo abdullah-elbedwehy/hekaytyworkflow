@@ -108,18 +108,20 @@ install_node() {
 }
 
 install_pdf_tools() {
-  step "PDF inspection and rendering (Poppler + qpdf)"
+  step "PDF inspection, rendering and CMYK export (Poppler + qpdf + Ghostscript)"
   local missing=()
   if ! have pdftoppm || ! have pdfinfo; then
     missing+=(poppler)
   fi
   have qpdf || missing+=(qpdf)
+  # Ghostscript does the RGB -> DeviceCMYK rewrite for the print master.
+  have gs || missing+=(ghostscript)
   if [[ "${#missing[@]}" -eq 0 ]]; then
-    ok "pdftoppm, pdfinfo, and qpdf already available"
+    ok "pdftoppm, pdfinfo, qpdf and gs already available"
     return
   fi
   brew install "${missing[@]}"
-  have pdftoppm && have pdfinfo && have qpdf \
+  have pdftoppm && have pdfinfo && have qpdf && have gs \
     || fail "PDF tools still missing after Homebrew install"
   ok "PDF tools installed"
 }
@@ -149,6 +151,18 @@ install_codex() {
   ok "Codex installed via npm → $HOME/.local/bin/codex"
 }
 
+install_obsidian() {
+  step "Obsidian"
+  if [[ -d /Applications/Obsidian.app || -d "$HOME/Applications/Obsidian.app" ]]; then
+    ok "Obsidian already installed"
+    return
+  fi
+  brew install --cask obsidian
+  [[ -d /Applications/Obsidian.app || -d "$HOME/Applications/Obsidian.app" ]] \
+    || fail "Obsidian still missing after Homebrew install"
+  ok "Obsidian installed"
+}
+
 install_python_deps() {
   local py="$1"
   step "Python packages (images, PDF, Arabic shaping)"
@@ -167,12 +181,12 @@ PY
 }
 
 check_dispatch() {
-  step "codex-imagegen dispatch"
-  local personal="$HOME/.cursor/skills/codex-imagegen/scripts/dispatch.py"
-  if [[ -f "$personal" ]]; then
-    ok "Found $personal"
+  step "Rawy image dispatch"
+  local bundled="$TOOLS/scripts/codex_imagegen_dispatch.py"
+  if [[ -f "$bundled" ]]; then
+    ok "Found repository-owned dispatcher"
   else
-    fail "codex-imagegen dispatch.py not found under ~/.cursor/skills; install the Codex imagegen skill for this user"
+    fail "Missing repository dispatcher: $bundled"
   fi
 }
 
@@ -204,11 +218,11 @@ print_summary() {
   printf '  tools:   %s\n' "$TOOLS"
   printf '  verify:  python3 %s/scripts/story_pipeline.py doctor\n' "$TOOLS"
   if [[ "$logged_in" -eq 1 ]]; then
-    printf '\n%sReady.%s قول ابدأ في Cursor.\n' "$GREEN" "$RESET"
+    printf '\n%sReady.%s افتح Rawy في Obsidian وابدأ مع الـAgent.\n' "$GREEN" "$RESET"
   else
     printf '\n%sNext (only remaining step):%s\n' "$BOLD" "$RESET"
     printf '  codex login\n'
-    printf '  ثم ابدأ كتاب: ابدأ / start في Cursor مع skill hekayati\n'
+    printf '  ثم افتح Rawy في Obsidian وابدأ مع الـAgent\n'
   fi
 }
 
@@ -225,7 +239,9 @@ main() {
   install_node
   install_pdf_tools
   install_codex
+  install_obsidian
   install_python_deps "$py"
+  python3 "$ROOT/tools/scripts/install_rawy_plugins.py" || warn "Rawy plugin download failed; enable them from Obsidian if needed"
   check_dispatch
 
   local logged_in=0

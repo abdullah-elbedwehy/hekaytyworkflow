@@ -22,7 +22,7 @@ import tempfile
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 # Sibling module (tools/scripts/textlayout.py). Works both when run as a script
 # (its dir is sys.path[0]) and when tests load this file by path via importlib.
@@ -32,16 +32,21 @@ if str(_SCRIPT_DIR) not in sys.path:
 from textlayout import (  # noqa: E402
     FONT_ENV_VAR,
     TextLayoutError,
-    layout_caption,
     missing_glyphs,
     resolve_arabic_font,
-    safe_zone_prompt_clause,
-    safe_zone_rect,
+    shape_arabic,
 )
 import promptdepth  # noqa: E402
+import prompt_targets  # noqa: E402
+import prompt_workflow  # noqa: E402
+import color_grade  # noqa: E402
+import scene_text  # noqa: E402
+import cmyk_export  # noqa: E402
 import doctrine  # noqa: E402
+import agent_context  # noqa: E402
 import manual_dispatch  # noqa: E402
 import obsidian_vault  # noqa: E402
+import rawy_vault  # noqa: E402
 from progress import book_progress  # noqa: E402
 from story_review import (  # noqa: E402
     apply_story_review,
@@ -326,7 +331,11 @@ COVER_SAMPLE_REFS = 2
 # are compiled from structured fields and bounded so nothing important falls
 # off the end.
 MIN_COMPILED_PROMPT_CHARS = 320
-MAX_COMPILED_PROMPT_CHARS = 3600
+# The cap belongs to the default target — one number, so the compiler and the
+# loader can never disagree about how long a ChatGPT prompt may be.
+MAX_COMPILED_PROMPT_CHARS = prompt_targets.profile(
+    prompt_targets.DEFAULT_TARGET
+).max_chars
 
 STORY_REVIEW_RELATIVE_PATH = "input/story-review.md"
 
@@ -2189,12 +2198,15 @@ def load_book(project: Path) -> dict[str, Any]:
         raise WorkflowError(
             f"Unsupported schemaVersion: {book.get('schemaVersion')!r}"
         )
+    prompt_workflow.initialize_book_state(book)
     return book
 
 
 def save_book(project: Path, book: dict[str, Any]) -> None:
     book["updatedAt"] = now_iso()
     atomic_json(manifest_path(project), book)
+    if rawy_vault.is_rawy_client(project):
+        rawy_vault.sync_rawy(project)
 
 
 def import_pillow() -> tuple[Any, Any, Any]:
@@ -2267,6 +2279,7 @@ def make_asset(asset_id: str, pdf_order: int | None, *, include_in_pdf: bool) ->
         "promptVersion": 1,
         "promptPath": f"input/prompts/{asset_id}.v01.json",
         "imagePath": None,
+        "rawImagePath": None,
         "storyText": None,
         "versions": [],
     }
@@ -2397,11 +2410,10 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
     if not project.is_dir():
         raise WorkflowError(f"Project folder does not exist: {project}")
     workflow_root = tools_root().parent
-    if path_is_within(project, workflow_root):
+    if path_is_within(project, workflow_root) and not rawy_vault.is_rawy_client(project):
         raise WorkflowError(
-            "Client projects cannot live inside the hekaytyworkflow Git repository. "
-            "Choose a separate absolute folder so child photos and generated books "
-            "cannot be committed by mistake."
+            "Client projects inside the repository are allowed only under "
+            f"{rawy_vault.clients_root()}. Other locations could expose private data."
         )
     if manifest_path(project).exists():
         raise WorkflowError(f"Project already initialized: {project}")
@@ -2416,6 +2428,8 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         style_dir(project),
         output_dir(project),
         output_dir(project) / "images",
+        output_dir(project) / "images" / "raw",
+        output_dir(project) / "images" / "composited",
         output_dir(project) / "pdf",
         output_dir(project) / "renders",
         output_dir(project) / "reviews",
@@ -2542,11 +2556,17 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
             "interview."
         ),
     }
+    prompt_workflow.initialize_book_state(book)
+    if rawy_vault.is_rawy_client(project):
+        prompt_workflow.ensure_client_surfaces(project)
     save_book(project, book)
-    # The review gate asks the family to edit Markdown, so the folder is made a
-    # real Obsidian vault at init rather than after they have already opened it
-    # as a bare directory.
-    vault = obsidian_vault.scaffold_client_vault(project, book)
+    # Rawy is the only vault for repository-owned client projects. External
+    # projects retain the legacy standalone-vault compatibility behavior.
+    vault = (
+        rawy_vault.sync_client(project)
+        if rawy_vault.is_rawy_client(project)
+        else obsidian_vault.scaffold_client_vault(project, book)
+    )
     structure = doctrine.structure_slots(page_count)
     return {
         "project": str(project),
@@ -5670,6 +5690,7 @@ def command_reopen_story_review(args: argparse.Namespace) -> dict[str, Any]:
             asset["storyText"] = None
     previous_review = book.get("storyReview") or {}
     book["storyPath"] = None
+    book["storyLock"] = None
     book["locationAssets"] = {}
     book["storyReview"] = {
         "status": "not_prepared",
@@ -5830,6 +5851,14 @@ def command_lock_story(args: argparse.Namespace) -> dict[str, Any]:
         *[asset_by_id(book, asset_id) for asset_id in expected_ids],
     ]
     book["storyPath"] = "input/story.json"
+    # An explicit marker so `context` can see the lock without inferring it from
+    # the location map or the copied story text. Both of those still work for a
+    # book locked before this existed; `reopen-story-review` clears all three.
+    book["storyLock"] = {
+        "lockedAt": now_iso(),
+        "storySha256": sha256(destination),
+        "locationAssetCount": len(location_assets),
+    }
     book["storyGoal"] = copy.deepcopy(payload.get("storyGoal"))
     book["settings"]["languageProfileId"] = quality_report["languageProfileId"]
     book["storyQuality"] = quality_report
@@ -5981,41 +6010,19 @@ def scan_prompt_for_franchise_names(payload: dict[str, Any], label: str) -> list
     return failures
 
 
-def _clean(value: Any) -> str:
-    """Collapse a field to a single clean line, or empty if it's a CHANGE stub."""
-    if not isinstance(value, str):
-        return ""
-    text = " ".join(value.split()).strip(" .")
-    if not text or text.upper().startswith("CHANGE"):
-        return ""
-    return text
+# The field cleaners live in prompt_targets, so every target renderer treats a
+# CHANGE stub, a stray list, and sentence casing identically.
+_clean = prompt_targets.clean
+_clean_list = prompt_targets.clean_list
+_join_sentences = prompt_targets.join_sentences
 
 
-def _clean_list(value: Any, limit: int) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    out: list[str] = []
-    for item in value:
-        text = _clean(item)
-        if text and text not in out:
-            out.append(text)
-        if len(out) >= limit:
-            break
-    return out
-
-
-def _join_sentences(parts: Iterable[str]) -> str:
-    """Join field fragments as real sentences, not lowercase run-ons."""
-    out: list[str] = []
-    for part in parts:
-        text = part.strip() if isinstance(part, str) else ""
-        if not text:
-            continue
-        out.append(text[0].upper() + text[1:])
-    return ". ".join(out) + "." if out else ""
-
-
-def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
+def build_compiled_prompt(
+    payload: dict[str, Any],
+    *,
+    orientation: str,
+    target: str = prompt_targets.DEFAULT_TARGET,
+) -> str:
     """Assemble the $imagegen prompt deterministically from the JSON fields.
 
     Written by code, not by the agent, for two reasons: the section order is
@@ -6023,7 +6030,16 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
     weight the head of a prompt most), and the result is bounded. Hand-written
     compiledPrompt strings drifted long and unordered, and the tail — which is
     where the Arabic text rules and the avoid list lived — got dropped.
+
+    ``target`` picks the phrasing, not the content: every target emits the same
+    binding clauses (the page's exact Arabic, print-safe palette, identity locks,
+    reference-sheet rule) from the same fields. See prompt_targets for what each
+    model wants and why.
     """
+    profile = prompt_targets.profile(target)
+    if profile.shape == "narrative":
+        return prompt_targets.build_narrative_prompt(payload, orientation=orientation)
+
     asset_id = str(payload.get("assetId") or "asset")
     is_character_sheet = asset_id == "character-sheet"
     is_location_sheet = asset_id.startswith("location-sheet-")
@@ -6103,7 +6119,8 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
             add(1, f"{names[pid]} ({pid}): " + "; ".join(primary) + ".")
 
         secondary: list[str] = []
-        for key in ("age", "skin", "build", "accessories"):
+        secondary_keys = ("age",) if is_character_sheet else ("age", "skin", "build", "accessories")
+        for key in secondary_keys:
             value = _clean(lock.get(key))
             if value and value.lower() not in {"none", "n/a"}:
                 secondary.append(value)
@@ -6117,6 +6134,11 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
             + "Each person must match their own reference photo — never swap "
             "identity, faces, or outfits between them.",
         )
+
+    # 2b. The reference rule (handoff §8 I3/I6). It used to live only in the
+    # Arabic manual message, which left the automated lane free to reach for the
+    # last image it made — the exact mechanism identity drifts through.
+    add(1, prompt_targets.reference_directive(payload, concise=True))
 
     # 3. What happens.
     for pid in on_page:
@@ -6174,15 +6196,41 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
     comp = "; ".join(b for b in comp_bits if b)
     if comp:
         add(3, f"Composition: {comp}.")
+    learned = payload.get("learnedRulesApplied") or []
+    learned_text = [
+        _clean(item.get("rule"))
+        for item in learned
+        if isinstance(item, dict) and _clean(item.get("rule"))
+    ]
+    if learned_text:
+        add(2, "Local approved prompt rules: " + "; ".join(learned_text[:3]) + ".")
 
-    # 8. Text. Nothing readable belongs in any generated image.
-    # The story text is NOT painted into the art. It is drawn afterwards as a
-    # real PDF text layer, so the illustration must arrive text-free with the
-    # caption band kept visually quiet. Image models invent malformed Arabic on
-    # every sign, poster and book cover they are given the chance to, so the ban
-    # is total rather than "no caption".
-    if not (is_character_sheet or is_location_sheet):
-        add(0, safe_zone_prompt_clause())
+    # 7b. Games. handoff §8 — an activity page has to be solvable exactly as
+    # drawn, from elements the agent named, so it rides at priority 0 with the
+    # identity locks rather than in the sheddable tail.
+    game_clause = prompt_targets.game_spec_clause(payload)
+    if game_clause:
+        add(0, game_clause)
+
+    # 8. Text. User-facing copy is generated inside the artwork itself.
+    # Keep the exact Arabic short and explicit so it survives prompt trimming.
+    raw_in_image_text = payload.get("inImageText")
+    in_image_text = str(raw_in_image_text).strip() if isinstance(raw_in_image_text, str) else ""
+    if in_image_text:
+        # Naming the surface is what stops the copy reading as a pasted caption:
+        # printed on a pinned note, a cloth banner or a windowsill, it belongs to
+        # the room, takes its light and its perspective, and prints as artwork.
+        surface = _clean(payload.get("textSurface"))
+        where = f"on {surface}" if surface else "on a surface"
+        add(
+            0,
+            f"Inside the artwork, {where}, render this exact Arabic RTL copy with "
+            "joined letters, following its angle and light. No overlay, "
+            "caption bar, or later text layer; do not alter, shorten, or add writing: "
+            f"{in_image_text}",
+        )
+    else:
+        add(0, "No visible writing anywhere in this image: every surface is blank.")
 
     # 9. Palette + continuity. The colour script rides just behind the palette:
     # it is the one sanctioned way a page may deviate, so it has to be read in
@@ -6193,7 +6241,7 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
     # exception, so it rides at a priority the length-shedding pass never drops.
     # The book prints Rich Coverage on coated stock; a deep-navy full bleed or a
     # pure-black fill is a reprint, not a style note.
-    add(1, doctrine.print_safe_clause("en"))
+    add(1, prompt_targets.prompt_print_safe_clause(payload))
     color_script = _clean(payload.get("colorScript"))
     if color_script:
         add(4, f"Colour emphasis for this beat only (same palette): {color_script}.")
@@ -6204,33 +6252,32 @@ def build_compiled_prompt(payload: dict[str, Any], *, orientation: str) -> str:
     if carried and carried.lower() != "n/a":
         add(4, f"Carried from the previous page: {carried}.")
 
-    # 10. Avoid — first to go, since the constraints it repeats are mostly
-    # already implied by the positive description above.
-    avoid = _clean_list(payload.get("avoid"), 12)
-    if len(on_page) >= 2 and not any("identity swap" in a.lower() for a in avoid):
-        avoid.append("identity swap between characters")
-    if avoid:
-        add(5, "Avoid: " + ", ".join(avoid) + ".")
+    # 10. Constraints — first to go, since they mostly restate the positive
+    # description above. Stated as what must be TRUE of the finished image: a
+    # bare "avoid X" list mainly teaches an image model which nouns belong in
+    # the picture, and the handful of bans that survive rewriting keep their
+    # negative form because there is no useful positive version of them.
+    positives, bans = prompt_targets.positive_constraints(
+        payload.get("avoid") or [], has_copy=bool(in_image_text)
+    )
+    if len(on_page) >= 2:
+        swap = "each person keeps their own face, hair, and outfit throughout"
+        if swap not in positives:
+            positives.append(swap)
+    if positives:
+        add(2, "Also true of the finished image: " + "; ".join(positives[:6]) + ".")
+    if bans:
+        add(2, "Do not include: " + ", ".join(bans[:4]) + ".")
 
-    def render(rows: list[tuple[int, str]]) -> str:
-        return " ".join(text for _, text in rows)
-
-    prompt = render(sections)
-    # Shed whole sections, least important first, until it fits. Never cut a
-    # sentence in half and never drop priority 0 or 1.
-    for priority in (5, 4, 3, 2):
-        if len(prompt) <= MAX_COMPILED_PROMPT_CHARS:
-            break
-        sections = [row for row in sections if row[0] != priority]
-        prompt = render(sections)
-    if len(prompt) > MAX_COMPILED_PROMPT_CHARS:
+    prompt, _ = prompt_targets.assemble(sections, cap=profile.max_chars)
+    if len(prompt) > profile.max_chars:
         longest = max(sections, key=lambda row: len(row[1]))[1]
         raise WorkflowError(
-            f"{asset_id}: even after dropping optional sections the prompt is "
-            f"{len(prompt)} chars (cap {MAX_COMPILED_PROMPT_CHARS}). Shorten the "
+            f"{asset_id}: even after dropping optional sections the {profile.label} "
+            f"prompt is {len(prompt)} chars (cap {profile.max_chars}). Shorten the "
             f"verbose field behind this text: {longest[:160]}…"
         )
-    return prompt.strip()
+    return prompt
 
 
 def command_compile_prompts(args: argparse.Namespace) -> dict[str, Any]:
@@ -6238,27 +6285,55 @@ def command_compile_prompts(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
     orientation = book_orientation(book)
+    # A prompt pack may explicitly opt into model-rendered Arabic.  The marker
+    # is written by the client prompt builder and keeps validation/build logic
+    # aligned without hand-editing book state.
     written: list[dict[str, Any]] = []
+    pending_writes: list[tuple[Path, dict[str, Any]]] = []
     for asset in book["assets"]:
         path = prompt_file(project, asset)
         if not path.is_file():
             raise WorkflowError(f"Missing prompt file: {path}")
         payload = read_json(path)
-        compiled = build_compiled_prompt(payload, orientation=orientation)
-        if len(compiled) < MIN_COMPILED_PROMPT_CHARS:
-            raise WorkflowError(
-                f"Compiled prompt for {asset['id']} is only {len(compiled)} chars — "
-                "the structured fields are too thin. Fill scene layers, identity "
-                f"locks, and actions in {path}"
+        # One render per image tool this page can be sent to. Both come from the
+        # same fields, so a page moves between ChatGPT and Nano Banana without
+        # being rewritten — and they are written together, so the two can never
+        # end up describing different pictures.
+        variants: dict[str, str] = {}
+        for target in prompt_targets.TARGETS:
+            compiled = build_compiled_prompt(
+                payload, orientation=orientation, target=target
             )
-        payload["compiledPrompt"] = compiled
+            if len(compiled) < MIN_COMPILED_PROMPT_CHARS:
+                raise WorkflowError(
+                    f"Compiled {target} prompt for {asset['id']} is only "
+                    f"{len(compiled)} chars — the structured fields are too thin. "
+                    f"Fill scene layers, identity locks, and actions in {path}"
+                )
+            variants[target] = compiled
+        payload["compiledPrompts"] = variants
+        payload["compiledPrompt"] = variants[prompt_targets.DEFAULT_TARGET]
+        pending_writes.append((path, payload))
+        written.append(
+            {
+                "assetId": asset["id"],
+                "chars": len(payload["compiledPrompt"]),
+                "targets": {name: len(text) for name, text in variants.items()},
+            }
+        )
+    for path, payload in pending_writes:
         atomic_json(path, payload)
-        written.append({"assetId": asset["id"], "chars": len(compiled)})
+    # Not a mode any more — every book renders its Arabic inside the artwork.
+    # The setting stays as a record of what a given book actually is.
+    if (book.get("settings") or {}).get("textRendering") != "in-image":
+        book.setdefault("settings", {})["textRendering"] = "in-image"
+        save_book(project, book)
     return {
         "compiled": len(written),
         "orientation": orientation,
+        "targets": list(prompt_targets.TARGETS),
         "assets": written,
-        "nextAction": "Run validate-prompts, then generate-book-images",
+        "nextAction": "Run validate-prompts and preflight, then prepare-prompt-review",
     }
 
 
@@ -6268,6 +6343,10 @@ def prompt_file(project: Path, asset: dict[str, Any]) -> Path:
         raise WorkflowError(f"{asset['id']} has no promptPath")
     path = project / relative
     return path
+
+
+compiled_variants = prompt_targets.compiled_variants
+compiled_for = prompt_targets.compiled_for
 
 
 def load_prompt_payload(path: Path) -> dict[str, Any]:
@@ -6285,6 +6364,82 @@ def load_prompt_payload(path: Path) -> dict[str, Any]:
             "by the image model — run compile-prompts to rebuild it bounded."
         )
     return payload
+
+
+def game_page_failures(
+    project: Path, book: dict[str, Any], story: dict[str, Any]
+) -> list[str]:
+    """handoff §8 — an activity page has to be authored, not left to the model.
+
+    The page's own story text is what makes it a game ("ساعد عمر يلاقي طريقه"),
+    so the pages are found the same way the prompt writer finds them. What is
+    checked is the part a rendered image will not reveal until it is printed:
+    that somebody actually wrote down the elements, and the puzzle's own
+    parameters, instead of hoping the model invents a solvable one.
+    """
+    pages = {
+        str(page.get("id")): page
+        for page in (story.get("pages") or [])
+        if isinstance(page, dict) and page.get("id")
+    }
+    failures: list[str] = []
+    for asset in book.get("assets") or []:
+        if not isinstance(asset, dict) or not asset.get("includeInPdf"):
+            continue
+        asset_id = str(asset.get("id") or "")
+        if prompt_workflow.integration_mode(asset_id, pages.get(asset_id)) != "game-native":
+            continue
+        path = prompt_file(project, asset)
+        if not path.is_file():
+            continue
+        try:
+            payload = load_prompt_payload(path)
+        except (WorkflowError, prompt_workflow.PromptWorkflowError):
+            continue
+        relative = asset.get("promptPath")
+        spec = payload.get("gameSpec")
+        if not isinstance(spec, dict):
+            failures.append(
+                f"{relative} reads as a game page but has no gameSpec — "
+                f"declare one of: {', '.join(doctrine.game_kinds())}. "
+                "If it is not a game page, set \"pageType\": \"story\" on that "
+                "page in story.json instead of leaving it to the heuristic"
+            )
+            continue
+        kind = str(spec.get("kind") or "").strip()
+        try:
+            required = doctrine.game_required_fields(kind)
+        except doctrine.DoctrineError as exc:
+            failures.append(f"{relative}: {exc}")
+            continue
+        for field in required:
+            value = spec.get(field)
+            if isinstance(value, str) and value.strip():
+                continue
+            if isinstance(value, list) and value:
+                continue
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                continue
+            failures.append(
+                f"{relative} gameSpec.{field} is required for a {kind} page — "
+                "the agent writes every element, the tool invents none"
+            )
+        if kind == "spot-the-difference":
+            count = spec.get("differenceCount")
+            listed = [item for item in (spec.get("differences") or []) if str(item).strip()]
+            if isinstance(count, int) and not isinstance(count, bool) and listed:
+                if count != len(listed):
+                    failures.append(
+                        f"{relative} promises {count} differences but lists "
+                        f"{len(listed)} — the page would be unsolvable"
+                    )
+        compiled = str(payload.get("compiledPrompt") or "").lower()
+        if compiled and prompt_targets.GAME_PLAYABILITY_MARKER not in compiled:
+            failures.append(
+                f"{relative} compiled prompt is missing the game playability "
+                "clause — run compile-prompts"
+            )
+    return failures
 
 
 def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
@@ -6341,11 +6496,16 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
             continue
         try:
             payload = load_prompt_payload(path)
-        except WorkflowError as exc:
+        except (WorkflowError, prompt_workflow.PromptWorkflowError) as exc:
             failures.append(str(exc))
             continue
         if payload.get("assetId") != asset["id"]:
             failures.append(f"assetId mismatch in {asset['promptPath']}")
+
+        # The blank-carrier plan (textIntegration / plannedRegion / carrierKind)
+        # is gone: the model draws the Arabic itself now, so what gets checked is
+        # `inImageText` further down. Legacy prompts may still carry the old
+        # block — it is ignored rather than enforced.
 
         composition = (
             payload.get("composition")
@@ -6494,47 +6654,102 @@ def command_validate_prompts(args: argparse.Namespace) -> dict[str, Any]:
                     )
 
         if asset["includeInPdf"]:
-            compiled = payload["compiledPrompt"]
-            lower = compiled.lower()
-            if len(on_page_ids) >= 2 and not any(
-                phrase in lower
-                for phrase in ("identity swap", "never swap identity")
-            ):
+            # Every target render carries the same binding clauses, so every
+            # target render is checked. A page that is print-safe in ChatGPT and
+            # not in Nano Banana is a reprint waiting for whichever tool gets
+            # opened that day.
+            variants = compiled_variants(payload)
+            absent = [t for t in prompt_targets.TARGETS if t not in variants]
+            if absent:
                 failures.append(
-                    f"compiledPrompt must forbid identity swap when 2+ people: "
-                    f"{asset['promptPath']} — run compile-prompts"
-                )
-            # The caption is drawn by the PDF builder, so the art must come back
-            # text-free with the band kept quiet. A prompt missing this clause
-            # produces art with baked-in gibberish Arabic under the real caption.
-            if "render no text" not in lower:
-                failures.append(
-                    f"compiledPrompt must forbid text inside the image: "
-                    f"{asset['promptPath']} — run compile-prompts"
-                )
-            # handoff §9 travels with every prompt, sheets included.
-            if "print-safe palette" not in lower:
-                failures.append(
-                    f"compiledPrompt is missing the handoff §9 print-safe palette "
-                    f"clause: {asset['promptPath']} — run compile-prompts"
+                    f"{asset['promptPath']} has no compiled prompt for "
+                    f"{', '.join(absent)} — run compile-prompts"
                 )
             exact_text = str(asset.get("storyText") or "").strip()
-            if exact_text and exact_text in compiled:
-                failures.append(
-                    f"story text must NOT appear in compiledPrompt — the caption "
-                    f"is a PDF text layer, not part of the art: {asset['promptPath']}"
-                )
+            for target, compiled in sorted(variants.items()):
+                label = f"compiledPrompts.{target}"
+                cap = prompt_targets.profile(target).max_chars
+                lower = compiled.lower()
+                if len(compiled) > cap:
+                    failures.append(
+                        f"{label} in {asset['promptPath']} is {len(compiled)} chars, "
+                        f"over the {cap} cap — run compile-prompts"
+                    )
+                if len(on_page_ids) >= 2 and not any(
+                    phrase in lower
+                    for phrase in ("identity swap", "never swap identity")
+                ):
+                    failures.append(
+                        f"{label} must forbid identity swap when 2+ people: "
+                        f"{asset['promptPath']} — run compile-prompts"
+                    )
+                # The story text is drawn inside the artwork, so the render
+                # has to carry the exact Arabic and the no-overlay instruction.
+                # A sheet carries neither, and must forbid writing outright.
+                in_image_text = str(payload.get("inImageText") or "").strip()
+                if in_image_text:
+                    if in_image_text not in compiled:
+                        failures.append(
+                            f"{label} is missing the exact in-image Arabic: "
+                            f"{asset['promptPath']} — run compile-prompts"
+                        )
+                    if prompt_targets.OVERLAY_BAN_MARKER not in lower:
+                        failures.append(
+                            f"{label} must forbid a text overlay: "
+                            f"{asset['promptPath']} — run compile-prompts"
+                        )
+                elif "no visible writing" not in lower:
+                    failures.append(
+                        f"{label} must forbid writing inside the image: "
+                        f"{asset['promptPath']} — run compile-prompts"
+                    )
+                # handoff §9 travels with every prompt, sheets included.
+                if "print-safe palette" not in lower:
+                    failures.append(
+                        f"{label} is missing the handoff §9 print-safe palette "
+                        f"clause: {asset['promptPath']} — run compile-prompts"
+                    )
+                # handoff §8 I3/I6 — the accepted sheet wins, and nothing
+                # generated earlier in the conversation counts as a reference.
+                if "reference sheet wins" not in lower:
+                    failures.append(
+                        f"{label} is missing the handoff §8 I3/I6 reference-sheet "
+                        f"rule: {asset['promptPath']} — run compile-prompts"
+                    )
+                # The page's approved Arabic and the copy handed to the image
+                # model must be the same string. A prompt that quietly reworded,
+                # trimmed, or dropped it prints a book nobody approved — and this
+                # is the cheap place to catch it, before the pack is approved and
+                # every page goes to the model.
+                if exact_text and not in_image_text:
+                    failures.append(
+                        f"{asset['promptPath']} has story text but no inImageText — "
+                        "the page's Arabic is drawn inside the artwork"
+                    )
+                elif exact_text and exact_text != in_image_text:
+                    failures.append(
+                        f"inImageText does not match the approved story text in "
+                        f"{asset['promptPath']} — the image would print unapproved copy"
+                    )
+    failures.extend(game_page_failures(project, book, story))
     if failures:
         raise WorkflowError("Prompt validation failed:\n- " + "\n- ".join(failures))
     for asset in book["assets"]:
         if asset["status"] == "planned":
             asset["status"] = "prompted"
-    book["status"] = "character_sheet"
-    book["nextAsset"] = "character-sheet"
-    book["nextAction"] = (
-        "Run generate-book-images --project <client> "
-        "(character-sheet via Codex, then all PDF pages in parallel)"
-    )
+    review_state = prompt_workflow.prompt_review_status(project, book)
+    if review_state.get("status") == "approved":
+        lane = prompt_workflow.selected_lane(book)
+        book["status"] = "ready_for_images" if lane else "awaiting_image_lane"
+        book["nextAction"] = (
+            "Continue the selected image lane"
+            if lane
+            else "Choose agent or manual image lane explicitly"
+        )
+    else:
+        book["status"] = "prompts_validated"
+        book["nextAction"] = "Run prepare-prompt-review and stop for whole-pack approval"
+    book["nextAsset"] = None
     save_book(project, book)
     scores = [row["score"] for row in depth_scores] or [0]
     return {
@@ -6598,6 +6813,7 @@ def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
     require_asset_id(book, args.asset)
     ensure_consent(book)
     approved_review = require_story_review_approved(project, book)
+    prompt_workflow.require_lane(project, book, expected="agent", asset_id=args.asset)
     asset = asset_by_id(book, args.asset)
     allow_parallel = bool(getattr(args, "allow_parallel", False))
     if asset["status"] == "generating" and not allow_parallel:
@@ -6657,20 +6873,26 @@ def command_begin_asset(args: argparse.Namespace) -> dict[str, Any]:
 
     path = prompt_file(project, asset)
     payload = load_prompt_payload(path)
-    # Story text is NOT embedded in image prompts. Since the overlay change the caption
-    # is drawn as a real PDF text layer at build time, and the art is generated text-free —
-    # so the prompt must carry the opposite instruction.
+    # The story text is drawn inside the artwork, so the prompt has to carry the
+    # approved Arabic verbatim — and only the approved Arabic. A page that goes
+    # to the model with reworded copy prints a book nobody signed off on.
     if asset["includeInPdf"] and asset["storyText"]:
         compiled = payload["compiledPrompt"]
-        if asset["storyText"] in compiled:
+        in_image_text = str(payload.get("inImageText") or "").strip()
+        if not in_image_text:
             raise WorkflowError(
-                f"Prompt embeds the story caption in the image: {path}. "
-                "Art must be text-free; the caption is added as a PDF text layer at build."
+                f"Prompt has no inImageText: {path}. The page's Arabic is drawn "
+                "inside the artwork, so it must be in the prompt."
             )
-        if "no text" not in compiled.lower():
+        if in_image_text != asset["storyText"].strip():
             raise WorkflowError(
-                f"Prompt is missing its no-text constraint: {path}. "
-                "Every page prompt must forbid text, letters, and signage in the image."
+                f"inImageText does not match the approved story text: {path}. "
+                "Recompile the prompt; the image must print the approved copy."
+            )
+        if in_image_text not in compiled:
+            raise WorkflowError(
+                f"Compiled prompt dropped the in-image Arabic: {path}. "
+                "Run compile-prompts before generating."
             )
 
     if asset["status"] != "generating":
@@ -6762,22 +6984,22 @@ def update_next_after_image(book: dict[str, Any], asset_id: str) -> None:
         book["nextAction"] = "Build and verify the draft PDF"
 
 
-def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
-    project = require_absolute(args.project, "project")
-    book = load_book(project)
-    # The user may edit story-review.md while a slow image call is in flight.
-    # Never accept those pixels against a story whose approval has gone stale.
-    approved_review = require_story_review_approved(project, book)
-    asset = asset_by_id(book, args.asset)
-    if asset["status"] != "generating":
-        raise WorkflowError(f"{args.asset} is not awaiting reconcile (status={asset['status']})")
-    if asset.get("storySha256") != approved_review.get("storySha256"):
-        raise WorkflowError(
-            f"{args.asset} started against a different story approval. Discard this "
-            "output and generate it again from the current approved story."
-        )
-    source = require_absolute(args.image, "image")
+def _stage_reconciled_image(
+    project: Path,
+    book: dict[str, Any],
+    asset: dict[str, Any],
+    source: Path,
+    *,
+    lane: str,
+) -> dict[str, Any]:
     width, height, image_format = validate_image(source)
+    expected_ratio = ORIENTATION_RATIOS[book_orientation(book)]
+    actual_ratio = width / height
+    if abs(actual_ratio - expected_ratio) / expected_ratio > ASPECT_TOLERANCE:
+        raise WorkflowError(
+            f"{asset['id']} aspect ratio {actual_ratio:.3f} does not match "
+            f"{book_orientation(book)} ({expected_ratio:.3f})"
+        )
 
     # The image agent is told to place a file at an exact path, and it can
     # satisfy that by copying an image that already exists nearby instead of
@@ -6785,23 +7007,28 @@ def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
     # artwork. Identical bytes across two assets is never legitimate here.
     digest = sha256(source)
     for other in book["assets"]:
-        if other["id"] == args.asset or not other.get("imagePath"):
+        if other["id"] == asset["id"]:
             continue
-        other_path = project / other["imagePath"]
-        if not other_path.is_file():
-            continue
-        if sha256(other_path) == digest:
-            raise WorkflowError(
-                f"{args.asset} image is byte-identical to {other['id']} — the "
-                "generator copied an existing image instead of drawing this "
-                f"page. Delete {source} and regenerate {args.asset}."
-            )
+        for relative_path in (other.get("imagePath"), other.get("rawImagePath")):
+            if not relative_path:
+                continue
+            other_path = project / str(relative_path)
+            if other_path.is_file() and sha256(other_path) == digest:
+                raise WorkflowError(
+                    f"{asset['id']} image is byte-identical to {other['id']} — the "
+                    "generator copied an existing image instead of drawing this page."
+                )
 
     suffix = source.suffix.lower() or ".png"
-    relative = f"output/images/{args.asset}{suffix}"
-    destination = project / relative
+    image_version = int(asset.get("imageVersion") or 0) + 1
+    raw_relative = f"output/images/raw/{asset['id']}.v{image_version:02d}{suffix}"
+    destination = project / raw_relative
+    if destination.exists():
+        raise WorkflowError(f"Refusing to overwrite image version: {destination}")
     atomic_copy(source, destination)
-    asset["imagePath"] = relative
+    asset["imageVersion"] = image_version
+    asset["rawImagePath"] = raw_relative
+    asset["imageLaneUsed"] = lane
     asset["completedAt"] = now_iso()
     started = asset.get("startedAt")
     if isinstance(started, str):
@@ -6816,24 +7043,347 @@ def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
         # died hours ago — one absurd sample would poison the median ETA.
         if 0 < elapsed <= CODEX_TIMEOUT_CEILING_SEC:
             asset["durationSec"] = round(elapsed, 1)
-    asset["status"] = "generated" if args.asset != "character-sheet" else "awaiting_review"
+    prompt = load_prompt_payload(prompt_file(project, asset))
+    integration = prompt.get("textIntegration") or {}
+    mode = str(integration.get("mode") or "none")
+    needs_composite = bool(str(asset.get("storyText") or "").strip()) and mode in {
+        "scene-surface",
+        "game-native",
+        "designed-page",
+    }
+    if needs_composite:
+        asset["imagePath"] = None
+        asset["status"] = "awaiting_surface_review"
+        book["status"] = "surface_review"
+        book["nextAsset"] = asset["id"]
+        book["nextAction"] = (
+            f"{asset['id']} was authored with the legacy blank-carrier plan: "
+            "review the carrier, then run resolve-text-surface"
+        )
+    else:
+        asset["imagePath"] = raw_relative
+        asset["status"] = "awaiting_review" if asset["id"] == "character-sheet" else "generated"
     version = asset["promptVersion"]
+    current_version = next(
+        (item for item in asset["versions"] if item.get("version") == version), None
+    )
+    if current_version is None:
+        current_version = {
+            "version": version,
+            "attempt": asset.get("attempt", 0),
+            "promptPath": asset["promptPath"],
+            "imagePath": None,
+            "reviewPath": None,
+            "status": asset["status"],
+            "storySha256": asset.get("storySha256"),
+        }
+        asset["versions"].append(current_version)
     for item in asset["versions"]:
         if item["version"] == version:
-            item["imagePath"] = relative
+            item["rawImagePath"] = raw_relative
+            item["imageVersion"] = image_version
+            item["imagePath"] = asset.get("imagePath")
             item["status"] = asset["status"]
             item["width"] = width
             item["height"] = height
             item["format"] = image_format
             item["sha256"] = sha256(destination)
-    update_next_after_image(book, args.asset)
+    if not needs_composite:
+        update_next_after_image(book, asset["id"])
+    invalidate_pdf_and_reviews(book)
+    return {
+        "asset": asset["id"],
+        "imagePath": asset.get("imagePath"),
+        "rawImagePath": str(destination),
+        "imageVersion": image_version,
+        "status": asset["status"],
+        "nextAction": book["nextAction"],
+    }
+
+
+def command_reconcile_image(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    approved_review = require_story_review_approved(project, book)
+    prompt_workflow.require_lane(project, book, expected="agent", asset_id=args.asset)
+    asset = asset_by_id(book, args.asset)
+    if asset["status"] != "generating":
+        raise WorkflowError(f"{args.asset} is not awaiting reconcile (status={asset['status']})")
+    if asset.get("storySha256") != approved_review.get("storySha256"):
+        raise WorkflowError(
+            f"{args.asset} started against a different story approval. Discard this "
+            "output and generate it again from the current approved story."
+        )
+    source = require_absolute(args.image, "image")
+    result = _stage_reconciled_image(project, book, asset, source, lane="agent")
+    save_book(project, book)
+    return result
+
+
+def command_prepare_prompt_review(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    require_story_review_approved(project, book)
+    result = prompt_workflow.prepare_prompt_review(project, book)
+    save_book(project, book)
+    return result
+
+
+def command_prompt_review_status(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    return prompt_workflow.prompt_review_status(project, load_book(project))
+
+
+def command_approve_prompts(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    require_story_review_approved(project, book)
+    result = prompt_workflow.approve_prompts(project, book, args.statement)
+    save_book(project, book)
+    return result
+
+
+def command_reopen_prompt_review(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    result = prompt_workflow.reopen_prompt_review(book, args.statement)
+    save_book(project, book)
+    return result
+
+
+def command_set_image_lane(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    result = prompt_workflow.set_image_lane(
+        project,
+        book,
+        lane=args.lane,
+        statement=args.statement,
+        asset_id=getattr(args, "asset", None),
+    )
+    save_book(project, book)
+    return result
+
+
+def command_image_inbox_status(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    result = prompt_workflow.inbox_status(project, book)
+    rows = [
+        {
+            **row,
+            "status": "ready" if row["known"] else "rejected: unknown asset ID",
+        }
+        for row in result["files"]
+    ]
+    prompt_workflow.write_inbox_status(project, rows)
+    return result
+
+
+def command_import_image_inbox(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    ensure_consent(book)
+    approved = require_story_review_approved(project, book)
+    prompt_workflow.require_prompt_approved(project, book)
+    requested = getattr(args, "asset", None)
+    candidates = prompt_workflow.inbox_candidates(project)
+    if requested:
+        candidates = [path for path in candidates if path.stem == requested]
+        if not candidates:
+            raise WorkflowError(f"No inbox image named {requested}.png|jpg|jpeg|webp")
+    results: list[dict[str, Any]] = []
+    status_rows: list[dict[str, Any]] = []
+    for source in candidates:
+        asset_id = source.stem
+        try:
+            asset = asset_by_id(book, asset_id)
+            prompt_workflow.require_lane(
+                project, book, expected="manual", asset_id=asset_id
+            )
+            if asset_id != "character-sheet":
+                sheet = asset_by_id(book, "character-sheet")
+                if sheet.get("status") != "accepted":
+                    raise WorkflowError(
+                        "Character sheet must be accepted before importing page images"
+                    )
+            asset["storySha256"] = approved["storySha256"]
+            result = _stage_reconciled_image(
+                project, book, asset, source, lane="manual"
+            )
+            processed = prompt_workflow.move_processed(
+                source, project, asset_id, int(result["imageVersion"])
+            )
+            result["processedPath"] = str(processed)
+            results.append(result)
+            status_rows.append(
+                {"file": source.name, "assetId": asset_id, "status": "imported"}
+            )
+        except (WorkflowError, prompt_workflow.PromptWorkflowError) as exc:
+            status_rows.append(
+                {"file": source.name, "assetId": asset_id, "status": f"rejected: {exc}"}
+            )
+    prompt_workflow.write_inbox_status(project, status_rows)
+    book.setdefault("imageInbox", {})["pending"] = len(
+        prompt_workflow.inbox_candidates(project)
+    )
+    book["imageInbox"]["checkedAt"] = now_iso()
+    save_book(project, book)
+    if requested and not results:
+        raise WorkflowError(status_rows[0]["status"])
+    return {"imported": results, "checked": len(status_rows)}
+
+
+def command_resolve_text_surface(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    require_story_review_approved(project, book)
+    prompt_workflow.require_prompt_approved(project, book)
+    asset = asset_by_id(book, args.asset)
+    if asset.get("status") != "awaiting_surface_review":
+        raise WorkflowError(
+            f"{args.asset} is not awaiting surface review (status={asset.get('status')})"
+        )
+    try:
+        quad = json.loads(args.quad)
+    except json.JSONDecodeError as exc:
+        raise WorkflowError("--quad must be JSON: [[x,y],[x,y],[x,y],[x,y]]") from exc
+    prompt_path = prompt_file(project, asset)
+    prompt = read_json(prompt_path)
+    integration = prompt.get("textIntegration")
+    if not isinstance(integration, dict) or integration.get("mode") == "none":
+        raise WorkflowError(f"{args.asset} has no compositable textIntegration plan")
+    runtime_integration = copy.deepcopy(integration)
+    runtime_integration["resolvedQuad"] = [
+        list(point) for point in scene_text.validate_quad(quad)
+    ]
+    runtime_integration["status"] = "resolved"
+    raw_relative = str(asset.get("rawImagePath") or "")
+    if not raw_relative:
+        raise WorkflowError(f"{args.asset} raw image is missing")
+    image_version = int(asset.get("imageVersion") or 1)
+    composed_relative = (
+        f"output/images/composited/{asset['id']}.v{image_version:02d}.png"
+    )
+    composed_path = project / composed_relative
+    if composed_path.exists():
+        raise WorkflowError(f"Refusing to overwrite composite version: {composed_path}")
+    try:
+        composition = scene_text.compose_scene_text(
+            project / raw_relative,
+            composed_path,
+            text=str(asset.get("storyText") or ""),
+            integration=runtime_integration,
+            settings=book.get("settings") or {},
+        )
+    except scene_text.SceneTextError as exc:
+        runtime_integration["status"] = "revise"
+        asset["textIntegrationRuntime"] = runtime_integration
+        asset["status"] = "needs_revision"
+        save_book(project, book)
+        raise WorkflowError(str(exc)) from exc
+    runtime_integration["status"] = "composited"
+    runtime_integration["compositedImageSha256"] = sha256(composed_path)
+    asset["textIntegrationRuntime"] = runtime_integration
+    asset["imagePath"] = composed_relative
+    asset["status"] = "generated"
+    for item in asset.get("versions") or []:
+        if item.get("version") == asset.get("promptVersion"):
+            item["imagePath"] = composed_relative
+            item["status"] = "generated"
+            item["sha256"] = runtime_integration["compositedImageSha256"]
+    update_next_after_image(book, asset["id"])
     invalidate_pdf_and_reviews(book)
     save_book(project, book)
     return {
-        "asset": args.asset,
-        "imagePath": str(destination),
+        "asset": asset["id"],
+        "imagePath": str(composed_path),
+        "sha256": runtime_integration["compositedImageSha256"],
+        "composition": composition,
         "nextAction": book["nextAction"],
     }
+
+
+def command_upgrade_text_integration(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    require_story_review_approved(project, book)
+    inventory_path = output_dir(project) / f"text-integration-upgrade-v{int(args.version)}-inventory.json"
+    if inventory_path.exists():
+        raise WorkflowError(f"Upgrade inventory already exists; refusing silent rerun: {inventory_path}")
+    prompt_inventory = []
+    for asset in book.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        path = prompt_file(project, asset)
+        if path.is_file():
+            prompt_inventory.append(
+                {
+                    "assetId": asset["id"],
+                    "version": asset.get("promptVersion"),
+                    "path": str(path.relative_to(project)),
+                    "sha256": sha256(path),
+                }
+            )
+    image_inventory = [
+        {
+            "path": str(path.relative_to(project)),
+            "sha256": sha256(path),
+        }
+        for path in sorted((output_dir(project) / "images").rglob("*"))
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    ]
+    atomic_json(
+        inventory_path,
+        {
+            "createdAt": now_iso(),
+            "textIntegrationVersion": int(args.version),
+            "progressBefore": book_progress(book),
+            "storyReview": copy.deepcopy(book.get("storyReview")),
+            "assetsBefore": copy.deepcopy(book.get("assets")),
+            "prompts": prompt_inventory,
+            "images": image_inventory,
+        },
+    )
+    result = prompt_workflow.upgrade_text_integration(
+        project, rawy_vault.rawy_root(), book, version=int(args.version)
+    )
+    book.setdefault("migrationHistory", []).append(
+        {
+            "kind": "text-integration",
+            "version": int(args.version),
+            "createdAt": now_iso(),
+            "inventoryPath": str(inventory_path.relative_to(project)),
+            "statement": "Intentional versioned text-integration upgrade; no source deletion",
+        }
+    )
+    save_book(project, book)
+    return {**result, "inventoryPath": str(inventory_path)}
+
+
+def command_list_prompt_learnings(args: argparse.Namespace) -> dict[str, Any]:
+    payload = prompt_workflow.load_learnings(rawy_vault.rawy_root())
+    return {"rules": payload["rules"], "eventCount": len(payload["events"])}
+
+
+def command_learn_prompt_feedback(args: argparse.Namespace) -> dict[str, Any]:
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    asset = asset_by_id(book, args.asset)
+    prompt_path = prompt_file(project, asset)
+    result = prompt_workflow.record_learning(
+        rawy_vault.rawy_root(),
+        project,
+        book,
+        asset_id=args.asset,
+        statement=args.statement,
+        category=args.category,
+        accepted=bool(args.accepted),
+        before_sha256=sha256(prompt_path) if prompt_path.is_file() else None,
+        after_sha256=sha256(prompt_path) if prompt_path.is_file() else None,
+    )
+    save_book(project, book)
+    return result
 
 
 def persist_review(project: Path, payload: dict[str, Any], destination: Path) -> str:
@@ -6892,6 +7442,20 @@ def command_character_review(args: argparse.Namespace) -> dict[str, Any]:
             item["reviewPath"] = stored_rel
     save_book(project, book)
     return {"decision": decision, "review": stored_rel, "nextAction": book["nextAction"]}
+
+
+def legacy_carrier_plan(integration: Any) -> bool:
+    """True for a prompt written before the model drew the Arabic itself.
+
+    Those pages planned a blank in-scene carrier and had the text projected onto
+    it afterwards, so their finished page is the composited file rather than the
+    raw render. Everything authored since carries `inImageText` and no plan at
+    all, and its raw render *is* the page.
+    """
+    if not isinstance(integration, dict):
+        return False
+    mode = str(integration.get("mode") or "").strip()
+    return bool(mode) and mode != "none"
 
 
 def ordered_pdf_assets(book: dict[str, Any]) -> list[dict[str, Any]]:
@@ -7098,20 +7662,13 @@ def draw_full_bleed(pdf: Any, image_path: Path, page_width: float, page_height: 
 
 
 CAPTION_FONT_NAME = "HekayatiArabic"
-# Ink colour for the caption. Near-black rather than pure black so it sits on
-# painted art without looking like a pasted-on UI label.
-CAPTION_FILL = (0.09, 0.09, 0.12)
-# A soft light plate under the text. The art is told to keep this band calm, but
-# calm is not the same as uniform, and a faint scrim keeps the caption legible
-# over a busy sunset without becoming the "hard white box" we ban in the art.
-CAPTION_SCRIM_ALPHA = 0.55
 
 
 def register_caption_font(book: dict[str, Any]) -> str:
     """Register the Arabic display font with reportlab and return its name.
 
-    The font is embedded in the PDF, so the caption survives on machines that
-    have never seen it.
+    The font is embedded in the PDF, so the invisible logical-text run survives
+    on machines that have never seen it.
     """
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
@@ -7156,58 +7713,128 @@ def _emit(pdf: Any, operator: str) -> None:
     pdf._code.append(operator)
 
 
-def draw_caption(
-    pdf: Any,
-    text: str,
-    page_width: float,
-    page_height: float,
-    font_name: str,
-) -> dict[str, Any]:
-    """Draw one page's story text as real, selectable PDF text.
+def draw_actual_text_only(pdf: Any, text: str, font_name: str) -> dict[str, Any]:
+    """Embed recoverable logical Arabic without drawing a visible caption.
 
-    The drawn string is visually ordered and contextually shaped, because
-    reportlab does neither. That would normally make copy/paste and text
-    extraction return presentation forms in reverse, so each line is wrapped in
-    a marked-content span carrying the logical Arabic as /ActualText — that is
-    what a PDF reader hands back on copy, and what `verify` checks.
+    The visible glyphs already exist in the composited PNG.  This invisible
+    marked-content run preserves copy/paste, accessibility, and verification.
     """
-    from reportlab.pdfbase import pdfmetrics
-
-    zone = safe_zone_rect(page_width, page_height)
-
-    def measure(value: str, size: float) -> float:
-        return pdfmetrics.stringWidth(value, font_name, size)
-
-    layout = layout_caption(text, zone, measure)
-
+    shaped = shape_arabic(text)
     covered = _font_covers(font_name)
-    absent = missing_glyphs("".join(line.shaped for line in layout.lines), covered)
+    absent = missing_glyphs(shaped, covered)
+    # The visible composited PNG already carries the designed text.  Keep the
+    # exact logical string in /ActualText, but omit unsupported decorative
+    # glyphs from the invisible embedded run (for example emoji) so a fuller
+    # fallback font is not required just to build the PDF.
     if absent:
-        font_path = _CAPTION_FONT_PATH.get(font_name, Path(font_name))
-        raise TextLayoutError(
-            f"the caption font ({font_path.name}) cannot draw "
-            f"{len(absent)} character(s): {' '.join(absent)}. They would print as "
-            "blank boxes. Supply a fuller Arabic .ttf via settings.textFont or "
-            f"{FONT_ENV_VAR}."
-        )
+        shaped = "".join(ch for ch in shaped if covered(ch))
+    begin, end = _actual_text_operators(text)
+    _emit(pdf, begin)
+    text_object = pdf.beginText(-1000, -1000)
+    text_object.setFont(font_name, 1)
+    text_object.setTextRenderMode(3)
+    text_object.textOut(shaped)
+    pdf.drawText(text_object)
+    _emit(pdf, end)
+    return {"text": text, "visible": False, "actualText": True}
 
-    pdf.saveState()
-    pdf.setFillColorRGB(1, 1, 1, alpha=CAPTION_SCRIM_ALPHA)
-    pdf.roundRect(
-        zone.x, zone.y, zone.width, zone.height, radius=zone.height * 0.12, fill=1, stroke=0
-    )
-    pdf.setFillColorRGB(*CAPTION_FILL)
-    pdf.setFont(font_name, layout.font_size)
-    for line in layout.lines:
-        begin, end = _actual_text_operators(line.logical)
-        _emit(pdf, begin)
-        pdf.drawString(line.x, line.baseline, line.shaped)
-        _emit(pdf, end)
-    pdf.restoreState()
+
+def require_images_approved(project: Path, book: dict[str, Any]) -> dict[str, Any]:
+    """The operator has actually looked at the art, and at *this* art.
+
+    Approval binds to the image bytes it was given, the same way the story and
+    the final PDF gates bind to theirs. Regenerating one page after approval
+    invalidates it — otherwise "approved" would mean "approved something, once".
+    """
+    approval = book.get("imageApproval") or {}
+    if approval.get("status") != "approved":
+        raise WorkflowError(
+            "The images have not been approved. Refresh the vault (rawy-sync), "
+            "have the operator review the gallery, then run approve-images."
+        )
+    _, current = pdf_asset_snapshot(project, book)
+    if approval.get("assetSnapshotSha256") != current:
+        raise WorkflowError(
+            "Images changed after they were approved. Refresh the gallery and "
+            "run approve-images again — the approval was for different art."
+        )
+    return approval
+
+
+def command_check_brightness(args: argparse.Namespace) -> dict[str, Any]:
+    """Flag pages that came back too dark to print well as a children's book.
+
+    This measures; it never edits. Post-grading a render was tried and removed:
+    lifting luminance raises Lab chroma even with the chroma restore switched
+    off (+7.3 measured on page-19), so every version of it pushed the art warmer
+    than the model drew it. A page that is too dark is a page to regenerate with
+    a better lighting prompt, not one to doctor afterwards.
+    """
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    from PIL import Image
+
+    rows: list[dict[str, Any]] = []
+    for asset in book.get("assets") or []:
+        if not isinstance(asset, dict) or not asset.get("imagePath"):
+            continue
+        source = project / str(asset["imagePath"])
+        if not source.is_file():
+            continue
+        measured = color_grade.analyze(Image.open(source).convert("RGB"))
+        verdict = color_grade.brightness_verdict(measured)
+        rows.append({"assetId": asset["id"], **measured, **verdict})
+    if not rows:
+        raise WorkflowError("No images to measure")
+    dark = [row for row in rows if not row["bright_enough"]]
     return {
-        "fontSize": layout.font_size,
-        "lineCount": len(layout.lines),
-        "text": layout.logical_text,
+        "measured": len(rows),
+        "tooDark": [row["assetId"] for row in dark],
+        "pages": rows,
+        "nextAction": (
+            "Brightness is fine across the book"
+            if not dark
+            else "Regenerate these pages — the prompt already asks for bright, "
+            "open lighting; do not post-process the render"
+        ),
+    }
+
+
+def command_approve_images(args: argparse.Namespace) -> dict[str, Any]:
+    """Record the operator's sign-off on the artwork, before any PDF is built."""
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    require_story_review_approved(project, book)
+    statement = str(getattr(args, "statement", "") or "").strip()
+    if not statement:
+        raise WorkflowError(
+            "--statement is required: record what the operator actually said"
+        )
+    outstanding = rawy_vault.read_image_notes(project)
+    known = {str(asset.get("id")) for asset in book.get("assets") or []}
+    flagged = sorted(asset for asset in outstanding if asset in known)
+    if flagged:
+        raise WorkflowError(
+            "These images still carry operator notes: "
+            + ", ".join(flagged)
+            + ". Redo them and clear the note, or the approval would contradict "
+            "the gallery."
+        )
+    snapshot, digest = pdf_asset_snapshot(project, book)
+    book["imageApproval"] = {
+        "status": "approved",
+        "approvedAt": now_iso(),
+        "statement": statement,
+        "assetCount": len(snapshot),
+        "assetSnapshotSha256": digest,
+    }
+    book["nextAction"] = "Run build --edition draft"
+    save_book(project, book)
+    return {
+        "project": str(project),
+        "approvedAssets": len(snapshot),
+        "assetSnapshotSha256": digest,
+        "nextAction": book["nextAction"],
     }
 
 
@@ -7215,6 +7842,9 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
     project = require_absolute(args.project, "project")
     book = load_book(project)
     approved_review = require_story_review_approved(project, book)
+    if args.edition == "draft":
+        # The gallery is the review surface; this is the gate it feeds.
+        require_images_approved(project, book)
     if args.edition == "final":
         final_approval = require_final_approval(project, book)
         draft_entry = (book.get("pdf") or {}).get("draft") or {}
@@ -7280,10 +7910,34 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         story_text = str(asset.get("storyText") or "").strip()
         if story_text:
             try:
-                drawn = draw_caption(pdf, story_text, page_width, page_height, font_name)
+                current_prompt_path = prompt_file(project, asset)
+                prompt = (
+                    read_json(current_prompt_path)
+                    if current_prompt_path.is_file()
+                    else {}
+                )
+                integration = prompt.get("textIntegration") or {}
+                mode = str(integration.get("mode") or "")
+                # The model drew the Arabic into the artwork, so the render that
+                # came back is already the finished page. The PDF only carries
+                # the same string invisibly, so copy, search and verify keep
+                # working; there is no caption overlay to draw.
+                #
+                # Books authored before the change still hold a blank-carrier
+                # plan and a separately composited file — those, and only those,
+                # must keep using it.
+                if legacy_carrier_plan(integration) and (
+                    "/composited/" not in f"/{asset.get('imagePath') or ''}"
+                ):
+                    raise WorkflowError(
+                        f"{asset['id']} was authored with a blank-carrier plan and "
+                        "still needs its composited image. Run resolve-text-surface, "
+                        "or recompile the prompt with inImageText."
+                    )
+                drawn = draw_actual_text_only(pdf, story_text, font_name)
             except TextLayoutError as exc:
                 raise WorkflowError(f"{asset['id']}: {exc}") from exc
-            captions.append({"assetId": asset["id"], **drawn})
+            captions.append({"assetId": asset["id"], "mode": mode or "in-image", **drawn})
         pdf.showPage()
     pdf.save()
     digest = sha256(destination)
@@ -7500,10 +8154,24 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
     orientation = book_orientation(book)
     expected_ratio = ORIENTATION_RATIOS[orientation]
     off_ratio: list[dict[str, Any]] = []
+    integration_failures: list[str] = []
     for index, asset_id in enumerate(pdf_ids(book), start=1):
         asset = asset_by_id(book, asset_id)
         image_path = project / asset["imagePath"]
         validate_image(image_path)
+        current_prompt_path = prompt_file(project, asset)
+        prompt = read_json(current_prompt_path) if current_prompt_path.is_file() else {}
+        integration = prompt.get("textIntegration") or {}
+        # Only pages authored with the old blank-carrier plan are held to the
+        # composited file; in-image pages ship their raw render.
+        if legacy_carrier_plan(integration):
+            runtime = asset.get("textIntegrationRuntime") or {}
+            if "/composited/" not in f"/{asset.get('imagePath') or ''}":
+                integration_failures.append(f"{asset_id}: legacy/non-composited image")
+            elif runtime.get("status") != "composited":
+                integration_failures.append(f"{asset_id}: surface not composited")
+            elif runtime.get("compositedImageSha256") != sha256(image_path):
+                integration_failures.append(f"{asset_id}: composited image hash changed")
         ratio = image_aspect(image_path)
         if abs(ratio - expected_ratio) / expected_ratio > ASPECT_TOLERANCE:
             off_ratio.append(
@@ -7522,6 +8190,11 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
             f"{len(off_ratio)} image(s) do not match the book orientation "
             f"({orientation}): {detail}. Regenerate them — mixed aspect ratios "
             "get cropped in the PDF and make the book look inconsistent."
+        )
+    if integration_failures:
+        raise WorkflowError(
+            "Text-integration verification failed:\n- "
+            + "\n- ".join(integration_failures)
         )
 
     pdftoppm = shutil.which("pdftoppm")
@@ -7562,7 +8235,10 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
         )
     else:
         book["status"] = "complete"
-        book["nextAction"] = "Handoff final PDF to user"
+        book["nextAction"] = (
+            "Run export-cmyk --edition final for the press master, then hand the "
+            "final PDF to the user"
+        )
     save_book(project, book)
     return {
         "edition": args.edition,
@@ -7574,6 +8250,55 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
         "draftSha256": actual_pdf_sha if args.edition == "draft" else None,
         "storySha256": approved_review["storySha256"],
         "nextAction": book["nextAction"],
+    }
+
+
+def command_export_cmyk(args: argparse.Namespace) -> dict[str, Any]:
+    """Final print step: rewrite the approved PDF into DeviceCMYK.
+
+    Everything upstream is RGB — the art comes back RGB and the Arabic is
+    composed into it as RGB pixels. This is the one pass that hands a press what
+    it actually separates from, and it refuses to leave a file named `-cmyk.pdf`
+    behind unless the conversion verifies.
+    """
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    entry = (book.get("pdf") or {}).get(args.edition) or {}
+    if entry.get("status") != "verified":
+        raise WorkflowError(
+            f"{args.edition} PDF is {entry.get('status') or 'not built'}; run "
+            f"verify --edition {args.edition} before exporting for print."
+        )
+    if args.edition == "final":
+        approval = book.get("finalApproval") or {}
+        if approval.get("status") != "approved":
+            raise WorkflowError(
+                "The final PDF has not been approved. Print export waits for "
+                "explicit human final approval."
+            )
+    try:
+        result = cmyk_export.export(
+            project / str(entry["path"]),
+            icc=cmyk_export.resolve_icc(args.icc),
+            preserve_k=not args.no_preserve_black,
+            lossless=args.lossless,
+            min_dpi=args.min_dpi,
+            force=args.force,
+        )
+    except cmyk_export.CmykError as exc:
+        raise WorkflowError(str(exc)) from exc
+    entry["cmykPath"] = str(Path(result["cmykPdf"]).relative_to(project))
+    entry["cmykExportedAt"] = now_iso()
+    entry["cmykWarnings"] = result["warnings"]
+    save_book(project, book)
+    return {
+        "edition": args.edition,
+        "cmykPdf": result["cmykPdf"],
+        "sizeMb": result["sizeMb"],
+        "iccProfile": result["iccProfile"],
+        "minDpi": result["after"]["minDpi"],
+        "warnings": result["warnings"],
+        "nextAction": "Send the -cmyk.pdf to the press; keep the RGB PDF as the archive master",
     }
 
 
@@ -8016,7 +8741,7 @@ def command_preflight(args: argparse.Namespace) -> dict[str, Any]:
     def run(name: str, fn: Any) -> Any:
         try:
             payload = fn()
-        except WorkflowError as exc:
+        except (WorkflowError, prompt_workflow.PromptWorkflowError) as exc:
             checks.append({"id": name, "ok": False, "detail": str(exc)})
             return None
         checks.append({"id": name, "ok": True, "detail": None})
@@ -8037,8 +8762,24 @@ def command_preflight(args: argparse.Namespace) -> dict[str, Any]:
     if book.get("storyPath"):
         checks.append({"id": "story-locked", "ok": True, "detail": None})
     else:
+        # An unlocked story is a blocking gate, not a silent one. Without the
+        # lock there are no location-sheet assets to write prompts for and no
+        # `storyText` to check the in-image Arabic against, so a pack written
+        # here looks valid, gets approved by the user, and goes stale the moment
+        # lock-story rebuilds the asset list.
         story_path = input_dir(project) / "story.json"
         if story_path.is_file():
+            checks.append(
+                {
+                    "id": "story-locked",
+                    "ok": False,
+                    "detail": (
+                        "story.json is not locked — run lock-story before writing "
+                        "prompts, or the location sheets and every page's storyText "
+                        "will be missing"
+                    ),
+                }
+            )
             story_report = run(
                 "review-story",
                 lambda: command_review_story(
@@ -8106,6 +8847,27 @@ def command_preflight(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def command_context(args: argparse.Namespace) -> dict[str, Any]:
+    """Where this book is, what is blocking it, and what to read for that step.
+
+    The orientation call. It exists so a session does not have to reconstruct
+    the state by reading the instruction stack — the state is in `book.json`,
+    and the gate ladder in `agent_context` turns it into one answer plus a
+    two-or-three file reading list scoped to the open gate.
+    """
+    project = require_absolute(args.project, "project")
+    book = load_book(project)
+    workers = getattr(args, "workers", None) or MAX_CODEX_WORKERS
+    return agent_context.build_context(
+        book,
+        project=str(project),
+        story_review=story_review_status(project, book),
+        prompt_review=prompt_workflow.prompt_review_status(project, book),
+        progress=book_progress(book, workers=workers),
+        until=getattr(args, "until", None),
+    )
+
+
 def command_progress(args: argparse.Namespace) -> dict[str, Any]:
     """Percent complete, current phase, and remaining time for one book.
 
@@ -8130,20 +8892,12 @@ def skill_scripts_dir() -> Path:
 
 
 def resolve_codex_dispatch() -> Path:
-    """Locate the user-installed codex-imagegen dispatch without repo symlinks."""
-    path = (
-        Path.home()
-        / ".cursor"
-        / "skills"
-        / "codex-imagegen"
-        / "scripts"
-        / "dispatch.py"
-    )
+    """Locate the repository-owned Codex image dispatcher."""
+    path = _SCRIPT_DIR / "codex_imagegen_dispatch.py"
     if path.is_file():
         return path.resolve()
     raise WorkflowError(
-        "codex-imagegen dispatch.py not found. Expected at "
-        "~/.cursor/skills/codex-imagegen/scripts/dispatch.py"
+        f"Repository image dispatcher is missing: {path}"
     )
 
 
@@ -8782,6 +9536,8 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
         )
 
     for tool_id, executable, fix in (
+        ("ghostscript", "gs", "Install Ghostscript for the CMYK print export "
+         "(macOS: brew install ghostscript)"),
         ("qpdf", "qpdf", "Install qpdf (macOS: brew install qpdf)"),
         ("pdftoppm", "pdftoppm", "Install Poppler (macOS: brew install poppler)"),
         ("pdfinfo", "pdfinfo", "Install Poppler (macOS: brew install poppler)"),
@@ -8845,9 +9601,21 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
             "id": "codex-imagegen",
             "ok": dispatch_ok,
             "detail": dispatch_path,
-            "fix": None
-            if dispatch_ok
-            else "Install codex-imagegen under ~/.cursor/skills/codex-imagegen",
+            "fix": None if dispatch_ok else "Restore tools/scripts/codex_imagegen_dispatch.py",
+        }
+    )
+
+    obsidian_paths = [
+        Path("/Applications/Obsidian.app"),
+        Path.home() / "Applications" / "Obsidian.app",
+    ]
+    obsidian = next((path for path in obsidian_paths if path.is_dir()), None)
+    checks.append(
+        {
+            "id": "obsidian",
+            "ok": bool(obsidian),
+            "detail": str(obsidian) if obsidian else "Obsidian.app not found",
+            "fix": None if obsidian else "Install Obsidian (macOS: brew install --cask obsidian)",
         }
     )
 
@@ -9070,9 +9838,14 @@ def command_apply_fixed_pages(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
-    """Emit self-contained ChatGPT instructions for the manual image lane."""
+    """Emit self-contained image instructions for the manual image lane."""
     project = require_absolute(args.project, "project")
+    target = getattr(args, "target", None) or prompt_targets.DEFAULT_TARGET
+    profile = prompt_targets.profile(target)
     book = load_book(project)
+    ensure_consent(book)
+    require_story_review_approved(project, book)
+    prompt_workflow.require_prompt_approved(project, book)
     story_path = input_dir(project) / "story.json"
     story = read_json(story_path) if story_path.exists() else {}
     story_text = {
@@ -9094,9 +9867,17 @@ def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
         raise WorkflowError("Pass --asset ID (repeatable) or --all")
     for asset_id in asset_ids:
         require_asset_id(book, asset_id)
+        prompt_workflow.require_lane(
+            project, book, expected="manual", asset_id=asset_id
+        )
 
     sheet = asset_by_id(book, "character-sheet")
     sheet_path = str(sheet.get("imagePath") or "") or None
+    # Where each asset lands in the finished book. Someone generating art
+    # outside the pipeline gets a folder of images with no order in it, so the
+    # slot travels in the message rather than in this conversation.
+    pdf_order = {asset_id: index for index, asset_id in enumerate(pdf_ids(book), start=1)}
+    pdf_total = len(pdf_order)
 
     blocks: list[dict[str, str]] = []
     for index, asset_id in enumerate(asset_ids):
@@ -9109,15 +9890,20 @@ def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
         payload = read_json(prompt_path)
         next_id = asset_ids[index + 1] if index + 1 < len(asset_ids) else None
         if asset_id == "character-sheet":
-            instruction = manual_dispatch.render_character_sheet_instruction(payload)
+            instruction = manual_dispatch.render_character_sheet_instruction(
+                payload, target=target
+            )
         else:
             instruction = manual_dispatch.render_manual_instruction(
                 payload,
                 asset_id=asset_id,
                 page_text=story_text.get(asset_id),
                 page_role=doctrine.page_role(asset_id, page_count),
+                page_number=pdf_order.get(asset_id),
+                page_total=pdf_total,
                 character_sheet_path=sheet_path,
                 next_asset_id=next_id,
+                target=target,
             )
         blocks.append({"assetId": asset_id, "instruction": instruction})
 
@@ -9136,6 +9922,8 @@ def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
 
     return {
         "mode": "manual-dispatch",
+        "target": profile.id,
+        "targetLabel": profile.label,
         "assets": asset_ids,
         "maxPagesPerMessage": int(
             doctrine.load_doctrine()["imageTool"]["maxPagesPerMessage"]
@@ -9152,25 +9940,115 @@ def command_manual_dispatch(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def command_init_vault(args: argparse.Namespace) -> dict[str, Any]:
-    """Make an existing client project openable as an Obsidian vault."""
+    """Compatibility entry: refresh Rawy client or scaffold external vault."""
     project = require_absolute(args.project, "project")
+    if rawy_vault.is_rawy_client(project):
+        result = rawy_vault.sync_client(project)
+        rawy_vault.sync_rawy()
+        return {"mode": "init-vault", **result}
     book = load_book(project) if manifest_path(project).exists() else None
     result = obsidian_vault.scaffold_client_vault(project, book)
     return {"mode": "init-vault", **result}
 
 
 def command_build_vault(args: argparse.Namespace) -> dict[str, Any]:
-    """Regenerate the studio vault in this repository from the doctrine."""
+    """Compatibility entry: refresh the Rawy vault and all client records."""
     repo_root = (
         require_absolute(args.root, "root")
         if getattr(args, "root", None)
         else tools_root().parent
     )
-    result = obsidian_vault.build_studio_vault(repo_root)
+    if repo_root != tools_root().parent:
+        raise WorkflowError(
+            "Rawy is repository-owned; --root must point at this workflow repository"
+        )
+    result = rawy_vault.sync_rawy()
     return {
         "mode": "build-vault",
         "doctrineVersion": doctrine.load_doctrine()["doctrineVersion"],
         **result,
+    }
+
+
+def command_rawy_new_client(args: argparse.Namespace) -> dict[str, Any]:
+    result = rawy_vault.create_client(
+        name=args.name,
+        phone=args.phone,
+        request=args.request,
+        created=args.created,
+        slug=args.slug,
+    )
+    return {"mode": "rawy-new-client", **result}
+
+
+def command_rawy_sync(args: argparse.Namespace) -> dict[str, Any]:
+    client = None
+    if getattr(args, "client", None) is not None:
+        client = require_absolute(args.client, "client")
+    return {"mode": "rawy-sync", **rawy_vault.sync_rawy(client)}
+
+
+def command_image_notes(args: argparse.Namespace) -> dict[str, Any]:
+    """What the operator wrote under each image in the Obsidian gallery.
+
+    This is the image-review gate: the operator looks at the gallery, writes an
+    objection under anything they want changed, and this reports exactly which
+    assets to redo — so a rework pass touches only the flagged pages instead of
+    regenerating the book.
+    """
+    project = require_absolute(args.project, "project")
+    notes = rawy_vault.read_image_notes(project)
+    book = load_book(project)
+    known = {str(asset.get("id")) for asset in book.get("assets") or []}
+    unknown = sorted(asset for asset in notes if asset not in known)
+    flagged = [
+        {"assetId": asset_id, "note": notes[asset_id]}
+        for asset_id in sorted(notes)
+        if asset_id in known
+    ]
+    return {
+        "project": str(project),
+        "gallery": str(project / rawy_vault.GALLERY_NOTE),
+        "flaggedCount": len(flagged),
+        "flagged": flagged,
+        "unknownAssets": unknown,
+        "nextAction": (
+            "No image notes — the operator has nothing outstanding; build when they say so"
+            if not flagged
+            else "Regenerate only these assets, then rerun rawy-sync so the gallery refreshes"
+        ),
+    }
+
+
+def command_rawy_archive(args: argparse.Namespace) -> dict[str, Any]:
+    """Take a finished client out of every active view, or bring them back.
+
+    Nothing is moved or deleted — the client note keeps one `archived` property,
+    which is also a checkbox in Obsidian, so this command and the vault UI are
+    two doors onto the same switch.
+    """
+    project = require_absolute(args.client, "client")
+    try:
+        result = rawy_vault.set_archived(project, archived=not args.restore)
+    except rawy_vault.RawyError as exc:
+        raise WorkflowError(str(exc)) from exc
+    rawy_vault.write_archive_note()
+    return {
+        "mode": "rawy-unarchive" if args.restore else "rawy-archive",
+        **result,
+        "nextAction": (
+            "Client is back in the active views"
+            if args.restore
+            else "Client moved to Archive.md; untick `archived` to restore"
+        ),
+    }
+
+
+def command_rawy_migrate(args: argparse.Namespace) -> dict[str, Any]:
+    source = require_absolute(args.source, "source")
+    return {
+        "mode": "rawy-migrate",
+        **rawy_vault.migrate_client(source, args.slug),
     }
 
 
@@ -9454,6 +10332,96 @@ def parser() -> argparse.ArgumentParser:
     )
     p_validate.set_defaults(func=command_validate_prompts)
 
+    p_prepare_prompt_review = sub.add_parser(
+        "prepare-prompt-review",
+        help="Export every latest prompt into Rawy and stop for whole-pack review",
+    )
+    add_project(p_prepare_prompt_review)
+    p_prepare_prompt_review.set_defaults(func=command_prepare_prompt_review)
+
+    p_prompt_status = sub.add_parser(
+        "prompt-review-status",
+        help="Report prompt feedback, approval, or stale hashes",
+    )
+    add_project(p_prompt_status)
+    p_prompt_status.set_defaults(func=command_prompt_review_status)
+
+    p_approve_prompts = sub.add_parser(
+        "approve-prompts", help="Approve the exact current prompt pack"
+    )
+    add_project(p_approve_prompts)
+    p_approve_prompts.add_argument("--statement", required=True)
+    p_approve_prompts.set_defaults(func=command_approve_prompts)
+
+    p_reopen_prompts = sub.add_parser(
+        "reopen-prompt-review", help="Reopen prompt review and clear image-lane choice"
+    )
+    add_project(p_reopen_prompts)
+    p_reopen_prompts.add_argument("--statement", required=True)
+    p_reopen_prompts.set_defaults(func=command_reopen_prompt_review)
+
+    p_lane = sub.add_parser(
+        "set-image-lane", help="Explicitly choose agent or manual images"
+    )
+    add_project(p_lane)
+    p_lane.add_argument("--lane", required=True, choices=["agent", "manual"])
+    p_lane.add_argument("--statement", required=True)
+    p_lane.add_argument(
+        "--asset", default=None, help="Optional one-asset fallback override"
+    )
+    p_lane.set_defaults(func=command_set_image_lane)
+
+    p_inbox_status = sub.add_parser(
+        "image-inbox-status", help="Inspect Rawy Images Inbox without importing"
+    )
+    add_project(p_inbox_status)
+    p_inbox_status.set_defaults(func=command_image_inbox_status)
+
+    p_inbox_import = sub.add_parser(
+        "import-image-inbox", help="Version and import manual-lane images"
+    )
+    add_project(p_inbox_import)
+    p_inbox_import.add_argument("--asset", default=None)
+    p_inbox_import.set_defaults(func=command_import_image_inbox)
+
+    p_upgrade_text = sub.add_parser(
+        "upgrade-text-integration",
+        help="Legacy blank-carrier books only: create schema-v2 prompt versions with carriers",
+    )
+    add_project(p_upgrade_text)
+    p_upgrade_text.add_argument("--version", required=True, type=int, choices=[1])
+    p_upgrade_text.set_defaults(func=command_upgrade_text_integration)
+
+    p_resolve_surface = sub.add_parser(
+        "resolve-text-surface",
+        help="Legacy blank-carrier books only: review the carrier and composite exact Arabic",
+    )
+    add_project(p_resolve_surface)
+    p_resolve_surface.add_argument("--asset", required=True)
+    p_resolve_surface.add_argument(
+        "--quad",
+        required=True,
+        help='Normalized JSON quad: [[x,y],[x,y],[x,y],[x,y]]',
+    )
+    p_resolve_surface.set_defaults(func=command_resolve_text_surface)
+
+    p_learnings = sub.add_parser(
+        "list-prompt-learnings", help="List privacy-safe local prompt rules"
+    )
+    p_learnings.set_defaults(func=command_list_prompt_learnings)
+
+    p_learn = sub.add_parser(
+        "learn-prompt-feedback", help="Record generalized prompt feedback locally"
+    )
+    add_project(p_learn)
+    p_learn.add_argument("--asset", required=True)
+    p_learn.add_argument("--statement", required=True)
+    p_learn.add_argument("--category", default="surface")
+    p_learn.add_argument(
+        "--rejected", dest="accepted", action="store_false", help="Mark result rejected"
+    )
+    p_learn.set_defaults(func=command_learn_prompt_feedback, accepted=True)
+
     p_preflight = sub.add_parser(
         "preflight",
         help="Run every deterministic gate at once and report one verdict",
@@ -9488,6 +10456,16 @@ def parser() -> argparse.ArgumentParser:
     add_project(p_verify)
     p_verify.add_argument("--edition", required=True, choices=["draft", "final"])
     p_verify.set_defaults(func=command_verify)
+
+    p_cmyk = sub.add_parser("export-cmyk")
+    add_project(p_cmyk)
+    p_cmyk.add_argument("--edition", default="final", choices=["draft", "final"])
+    p_cmyk.add_argument("--icc", help="Press-supplied CMYK output profile")
+    p_cmyk.add_argument("--lossless", action="store_true")
+    p_cmyk.add_argument("--min-dpi", type=int, default=300)
+    p_cmyk.add_argument("--no-preserve-black", action="store_true")
+    p_cmyk.add_argument("--force", action="store_true")
+    p_cmyk.set_defaults(func=command_export_cmyk)
 
     p_contact = sub.add_parser("contact-sheet")
     add_project(p_contact)
@@ -9567,9 +10545,15 @@ def parser() -> argparse.ArgumentParser:
 
     p_manual = sub.add_parser(
         "manual-dispatch",
-        help="Self-contained ChatGPT instructions for the manual image lane",
+        help="Self-contained image instructions for the manual image lane",
     )
     add_project(p_manual)
+    p_manual.add_argument(
+        "--target",
+        choices=list(prompt_targets.TARGETS),
+        default=prompt_targets.DEFAULT_TARGET,
+        help="Which image tool the message is written for",
+    )
     p_manual.add_argument(
         "--asset",
         action="append",
@@ -9591,10 +10575,78 @@ def parser() -> argparse.ArgumentParser:
     p_init_vault.set_defaults(func=command_init_vault)
 
     p_build_vault = sub.add_parser(
-        "build-vault", help="Regenerate the studio Obsidian vault from the doctrine"
+        "build-vault", help="Refresh the Rawy Obsidian vault and all client records"
     )
     p_build_vault.add_argument("--root", type=Path, default=None)
     p_build_vault.set_defaults(func=command_build_vault)
+
+    p_rawy_new = sub.add_parser(
+        "rawy-new-client", help="Create one private client record under Rawy/Clients"
+    )
+    p_rawy_new.add_argument("--name", required=True)
+    p_rawy_new.add_argument("--phone", required=True)
+    p_rawy_new.add_argument("--request", required=True)
+    p_rawy_new.add_argument("--created", default=None, help="YYYY-MM-DD; defaults to today")
+    p_rawy_new.add_argument("--slug", default=None)
+    p_rawy_new.set_defaults(func=command_rawy_new_client)
+
+    p_rawy_sync = sub.add_parser(
+        "rawy-sync", help="Refresh Rawy statistics and client records"
+    )
+    p_rawy_sync.add_argument("--client", type=Path, default=None)
+    p_rawy_sync.set_defaults(func=command_rawy_sync)
+
+    p_bright = sub.add_parser(
+        "check-brightness", help="Flag pages too dark for a children's book (measures only)"
+    )
+    add_project(p_bright)
+    p_bright.set_defaults(func=command_check_brightness)
+
+    p_approve_images = sub.add_parser(
+        "approve-images", help="Record the operator's sign-off on the artwork"
+    )
+    add_project(p_approve_images)
+    p_approve_images.add_argument("--statement", required=True)
+    p_approve_images.set_defaults(func=command_approve_images)
+
+    p_image_notes = sub.add_parser(
+        "image-notes", help="Read the operator's per-image notes from the Obsidian gallery"
+    )
+    add_project(p_image_notes)
+    p_image_notes.set_defaults(func=command_image_notes)
+
+    p_rawy_archive = sub.add_parser(
+        "rawy-archive", help="Archive one client (or --restore to bring them back)"
+    )
+    p_rawy_archive.add_argument("--client", type=Path, required=True)
+    p_rawy_archive.add_argument(
+        "--restore", action="store_true", help="Un-archive instead"
+    )
+    p_rawy_archive.set_defaults(func=command_rawy_archive)
+
+    p_rawy_migrate = sub.add_parser(
+        "rawy-migrate", help="Move an external client into Rawy with verification and rollback"
+    )
+    p_rawy_migrate.add_argument("--source", required=True, type=Path)
+    p_rawy_migrate.add_argument("--slug", required=True)
+    p_rawy_migrate.set_defaults(func=command_rawy_migrate)
+
+    p_context = sub.add_parser(
+        "context",
+        help="Open gate, next command, and the files worth reading for this step",
+    )
+    add_project(p_context)
+    p_context.add_argument(
+        "--until",
+        default=None,
+        choices=list(agent_context.GATE_KEYS),
+        help=(
+            "The user already authorized reaching this gate: also return the "
+            "commands to run without asking, and the first rung that still "
+            "needs a human"
+        ),
+    )
+    p_context.set_defaults(func=command_context)
 
     p_status = sub.add_parser("status")
     add_project(p_status)
@@ -9707,7 +10759,10 @@ def main() -> None:
         WorkflowError,
         doctrine.DoctrineError,
         obsidian_vault.VaultError,
+        rawy_vault.RawyError,
         manual_dispatch.ManualDispatchError,
+        prompt_workflow.PromptWorkflowError,
+        scene_text.SceneTextError,
     ) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         sys.exit(1)

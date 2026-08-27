@@ -57,9 +57,45 @@ RICH_SCENE = {
 }
 
 
-def rich_prompt(asset_id: str, *, shot: str, view: str, participants: bool = True) -> dict:
+# Story text lives inside the art, so every page prompt carries a schema-v2
+# in-scene carrier plan. Sheets carry none.
+CARRIER_KINDS = ("wall-frame", "open-book", "toy-box-face", "small-chalkboard")
+
+
+def text_integration(asset_id: str, index: int) -> dict:
+    if asset_id == "character-sheet" or asset_id.startswith("location-sheet-"):
+        return {"version": 1, "mode": "none", "status": "not-applicable"}
+    mode = (
+        "designed-page"
+        if asset_id in {"cover", "page-01", "page-22", "back-cover"}
+        else "scene-surface"
+    )
+    return {
+        "version": 1,
+        "mode": mode,
+        "carrierKind": (
+            "designed-copy-area"
+            if mode == "designed-page"
+            else CARRIER_KINDS[index % len(CARRIER_KINDS)]
+        ),
+        "carrierDescription": "a flat blank carrier standing clear inside the scene",
+        "rationaleAr": "سطح طبيعي في المشهد يشيل النص من غير ما يبان كطبقة فوق الرسمة",
+        "treatment": "printed-ink",
+        "plannedRegion": {"x": 0.56, "y": 0.10, "width": 0.35, "height": 0.42},
+        "maxLines": 5,
+        "minimumFontPt": 12,
+        "textSource": "asset.storyText",
+        "resolvedQuad": None,
+        "status": "planned",
+    }
+
+
+def rich_prompt(
+    asset_id: str, *, shot: str, view: str, participants: bool = True, index: int = 0
+) -> dict:
     payload: dict = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
+        "textIntegration": text_integration(asset_id, index),
         "assetId": asset_id,
         "version": 1,
         "useCase": "illustration-story",
@@ -169,6 +205,7 @@ class DepthGateIntegration(unittest.TestCase):
                 shot=shot,
                 view=view,
                 participants=not asset["id"].startswith("location-sheet-"),
+                index=index,
             )
             if mutate:
                 payload = mutate(asset["id"], payload) or payload
@@ -188,6 +225,136 @@ class DepthGateIntegration(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertGreaterEqual(result["depth"]["min"], 70)
         self.assertEqual(len(result["depth"]["weakest"]), 3)
+
+    def test_a_page_whose_arabic_never_reaches_the_prompt_is_blocked(self) -> None:
+        """The copy is drawn into the art, so a prompt without it prints nothing."""
+        book = pipeline.load_book(self.project)
+        for asset in book["assets"]:
+            if asset["id"] == "page-02":
+                asset["storyText"] = "عبد الله رتب لعبه قبل ما ينام"
+        pipeline.save_book(self.project, book)
+        self.write_prompts()
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            self.validate(min_depth=None)
+        self.assertIn("no inImageText", str(caught.exception))
+
+    def test_reworded_in_image_copy_is_blocked(self) -> None:
+        """A page may not print Arabic the family never approved."""
+        approved = "عبد الله رتب لعبه قبل ما ينام"
+        book = pipeline.load_book(self.project)
+        for asset in book["assets"]:
+            if asset["id"] == "page-02":
+                asset["storyText"] = approved
+        pipeline.save_book(self.project, book)
+
+        def reword(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = approved + " بدري"
+            return payload
+
+        self.write_prompts(reword)
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            self.validate(min_depth=None)
+        self.assertIn("does not match the approved story text", str(caught.exception))
+
+    def test_matching_in_image_copy_passes(self) -> None:
+        approved = "عبد الله رتب لعبه قبل ما ينام"
+        book = pipeline.load_book(self.project)
+        for asset in book["assets"]:
+            if asset["id"] == "page-02":
+                asset["storyText"] = approved
+        pipeline.save_book(self.project, book)
+
+        def fill(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = approved
+            return payload
+
+        self.write_prompts(fill)
+        self.assertTrue(self.validate(min_depth=None)["valid"])
+
+    def _make_game_page(self, asset_id: str = "page-02") -> str:
+        """Give one page story text that reads as a game instruction."""
+        instruction = "ساعد عمر يلاقي طريقه للبيت وسط النجوم"
+        story_path = self.project / "input" / "story.json"
+        story = pipeline.read_json(story_path)
+        for page in story["pages"]:
+            if page["id"] == asset_id:
+                page["role"] = instruction
+        pipeline.atomic_json(story_path, story)
+        book = pipeline.load_book(self.project)
+        for asset in book["assets"]:
+            if asset["id"] == asset_id:
+                asset["storyText"] = instruction
+        pipeline.save_book(self.project, book)
+        return instruction
+
+    def test_a_game_page_without_a_gamespec_is_blocked(self) -> None:
+        """A model left to invent a maze draws one with three exits."""
+        instruction = self._make_game_page()
+
+        def fill(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = instruction
+            return payload
+
+        self.write_prompts(fill)
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            self.validate(min_depth=None)
+        self.assertIn("no gameSpec", str(caught.exception))
+
+    def test_a_maze_missing_its_two_ends_is_blocked(self) -> None:
+        instruction = self._make_game_page()
+
+        def fill(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = instruction
+                payload["gameSpec"] = {"kind": "maze", "elements": ["stone walls"]}
+            return payload
+
+        self.write_prompts(fill)
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            self.validate(min_depth=None)
+        message = str(caught.exception)
+        self.assertIn("gameSpec.startDescription", message)
+        self.assertIn("gameSpec.goalDescription", message)
+
+    def test_a_difference_count_that_lies_is_blocked(self) -> None:
+        """Five promised, two drawn — the page is unsolvable in print."""
+        instruction = self._make_game_page()
+
+        def fill(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = instruction
+                payload["gameSpec"] = {
+                    "kind": "spot-the-difference",
+                    "differenceCount": 5,
+                    "differences": ["the truck loses a wheel", "the lamp turns off"],
+                    "elements": ["two panels side by side"],
+                }
+            return payload
+
+        self.write_prompts(fill)
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            self.validate(min_depth=None)
+        self.assertIn("promises 5 differences but lists 2", str(caught.exception))
+
+    def test_a_fully_declared_game_page_passes(self) -> None:
+        instruction = self._make_game_page()
+
+        def fill(asset_id: str, payload: dict):
+            if asset_id == "page-02":
+                payload["inImageText"] = instruction
+                payload["gameSpec"] = {
+                    "kind": "maze",
+                    "startDescription": "the hero on the rooftop, lower left",
+                    "goalDescription": "the lit house, upper right",
+                    "elements": ["grey stone corridor walls one tile thick"],
+                }
+            return payload
+
+        self.write_prompts(fill)
+        self.assertTrue(self.validate(min_depth=None)["valid"])
 
     def test_a_vague_scene_blocks_the_whole_folder(self) -> None:
         def make_thin(asset_id: str, payload: dict):

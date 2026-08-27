@@ -13,8 +13,10 @@ creates an Obsidian-friendly Markdown storyboard containing every page’s exact
 Arabic text and scene description, stops, and waits for the family/editor to
 review it.
 
-The repository contains workflow code only. Create each client project outside
-this repository; child photos and generated books must never be committed.
+The repository contains the portable workflow and the Rawy Obsidian interface.
+Private client projects live only under the Git-ignored
+`Rawy/Clients/<slug>/` tree; child photos and generated books must never be
+committed.
 
 ## Setup
 
@@ -27,18 +29,24 @@ python3 tools/scripts/story_pipeline.py doctor
 ```
 
 The setup installs Python dependencies plus the PDF inspection/rendering tools.
-Image generation uses the user-installed Codex `imagegen` skill only.
+Image generation uses Codex `imagegen` through the bundled repository
+dispatcher. No separate Hekayati or image-dispatch skill installation is
+needed.
 
 ## Permanent story-review gate
 
-Initialize a client folder outside this checkout and draft or apply a story:
+Create a Rawy client and draft or apply a story in its private folder:
 
 ```bash
-python3 tools/scripts/story_pipeline.py init --project /ABS/CLIENT --pages 20
-python3 tools/scripts/story_pipeline.py prepare-story-review --project /ABS/CLIENT
+python3 tools/scripts/story_pipeline.py rawy-new-client \
+  --name "NAME" --phone "PHONE" --request "REQUEST" --slug CLIENT
+python3 tools/scripts/story_pipeline.py init \
+  --project "$PWD/Rawy/Clients/CLIENT" --pages 24
+python3 tools/scripts/story_pipeline.py prepare-story-review \
+  --project "$PWD/Rawy/Clients/CLIENT"
 ```
 
-Open `/ABS/CLIENT` itself as an Obsidian vault, then edit
+Open `Rawy/` as the Obsidian vault, enter the client page, then edit the linked
 `input/story-review.md`. Keep the page/field marker comments intact; change the
 visible page text and scene description only. The workflow will not lock the
 story or start an image job while this review is pending or stale.
@@ -77,8 +85,10 @@ interior pages — `page-01` الإهداء, `page-02`…`page-21` the 20 story 
 `page-22` «قصص تانية» — and a separate back cover. The dedication, the
 «قصص تانية» page, and the back-cover marketing copy are fixed text owned by the
 doctrine; write them with `apply-fixed-pages`, never by hand. Art themes always come
-from the live theme catalog; do not hard-code a short menu. Illustrations are
-text-free: the PDF builder adds the exact Arabic as a real text layer.
+from the live theme catalog; do not hard-code a short menu. The image model draws
+each page's approved Arabic **inside** the illustration, on a surface that belongs
+to the scene, so the words live in the picture — never as a caption overlay. The
+PDF carries the same string invisibly so copy, search and `verify` keep working.
 
 ## Tests
 
@@ -102,19 +112,20 @@ python3 tools/scripts/story_pipeline.py check-doctrine --project /ABS/CLIENT
 a metaphor for an inner feeling, a rewritten dedication, a missing story type, or
 a 19-page book blocks the run before any image is generated.
 
-## Obsidian
+## Rawy in Obsidian
 
-The repository itself is an Obsidian vault. Open the repo folder in Obsidian and
-start at [`vault/Home.md`](vault/Home.md) — doctrine notes, the two gate
-checklists, the book tracker, and the runbooks are all generated from the
-doctrine, so the checklist a human ticks is the rule the pipeline enforces.
+Open [`Rawy/Dashboard.md`](Rawy/Dashboard.md) as the vault home. The dashboard
+carries two links and two tables: what needs attention, and every client. Each
+client page links directly to its available story review and PDFs. Doctrine,
+technical JSON, prompts, caches, and heavy image folders stay outside the
+visible operator navigation.
 
-```bash
-python3 tools/scripts/story_pipeline.py build-vault
-```
-
-Each client project is a vault too. `init` scaffolds it; `init-vault` repairs an
-older one.
+Rawy uses Obsidian core Bases, search, and bookmarks only — the community-plugin
+list is empty and no plugin has to be installed. Every action on the dashboard is
+a plain link core Obsidian can follow, and every editable field is a note
+property, editable in the properties panel or straight in the Bases table.
+`build-vault` remains a compatibility alias for a full Rawy refresh; `init-vault`
+refreshes one Rawy client.
 
 ## The manual image lane
 
@@ -129,8 +140,23 @@ python3 tools/scripts/story_pipeline.py manual-dispatch \
 
 The automated Codex lane is unchanged; this is the export for the manual one.
 
-Detailed operating instructions are in
-[`tools/references/agent-core.md`](tools/references/agent-core.md) and the Cursor
-skill at [`.cursor/skills/hekayati/SKILL.md`](.cursor/skills/hekayati/SKILL.md).
-The rulebook itself is [`tools/references/handoff.md`](tools/references/handoff.md).
+## Where the instructions live
 
+One chain, no duplicates:
+
+| File | Owns |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Operator contract — privacy, client data, how to behave. `CLAUDE.md` and the Cursor rule only point here. |
+| [`.agents/skills/hekayati/SKILL.md`](.agents/skills/hekayati/SKILL.md) | The router: the ten production gates and what to load when. |
+| [`tools/references/workflow/`](tools/references/workflow) | Stage detail — `routing.md`, `story.md`, `prompts.md`. Loaded per step, not per session. |
+| [`tools/references/reviews/`](tools/references/reviews) | The four post-draft rubrics. |
+| [`tools/references/handoff.md`](tools/references/handoff.md) | The law. Wins every conflict. |
+
+A session orients with one command instead of reading the stack:
+
+```bash
+python3 tools/scripts/story_pipeline.py context --project /ABS/CLIENT
+```
+
+It returns the open gate, the exact next command, and the two or three files
+worth reading for that step.

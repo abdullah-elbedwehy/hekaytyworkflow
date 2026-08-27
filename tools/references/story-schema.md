@@ -105,6 +105,7 @@ too. The back cover keeps its `resolution` stage.
       "guests": [],
       "locationId": "lantern-square",
       "setting": "place",
+      "pageType": "story",
       "action": "one drawable group action",
       "transitionFromPrevious": "بعد ما خرجوا من البيت، راحوا عند ميدان الفوانيس.",
       "protectedPhrases": [
@@ -116,6 +117,24 @@ too. The back cover keeps its `resolution` stage.
   ]
 }
 ```
+
+### `pageType` — `story` or `game` (optional, but say it on a game page)
+
+A game page has to declare a `gameSpec` in its prompt, and `validate-prompts`
+only demands one on pages it recognises as games. Recognition is a heuristic
+over the page's `beat`, `setting` and its visible `text` — the instruction the
+child reads («ساعد سما توصل للفصل») is usually what gives it away.
+
+Set `pageType` when the heuristic would get it wrong, in either direction:
+
+- `"game"` — this page is a puzzle even though nothing in its wording says so.
+- `"story"` — this page is ordinary narration that happens to contain a word the
+  heuristic reads as an instruction. Setting it is how you clear a false
+  `gameSpec` demand from `validate-prompts`; do not add a fake `gameSpec` to
+  make the error go away.
+
+Omit it and the heuristic decides. Fixed pages (`cover`, `page-01`, `page-22`,
+`back-cover`) and reference sheets are never game pages.
 
 ## Story type (required — handoff §5)
 
@@ -347,9 +366,9 @@ Details and interview wording: `personalization.md`.
 - `participants` = exact persona ids on that page (subset OK).
 - Never list a persona who is off-camera.
 - Cover / climax / back cover often include everyone; quiet beats may be solo.
-- Each page `text` is the Arabic caption later rendered as a real PDF text
-  layer. Use the selected age profile; there is no single word cap shared by
-  ages 1–8.
+- Each page `text` is the exact Arabic the image model later draws on that page's
+  in-scene text surface. Use the selected age profile; there is no single word cap
+  shared by ages 1–8.
 - Pipeline passes **only on-page persona photos** + character-sheet as image refs.
 
 ## Famous / franchise guests

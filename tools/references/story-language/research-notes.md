@@ -10,10 +10,13 @@ is not a source-text archive.
 
 ### Local PDF review set
 
-- `/Users/abdullah/Downloads/قصة من خير الناس.pdf`
-- `/Users/abdullah/Downloads/02-أين-رحلت-الشمس؟.pdf`
-- `/Users/abdullah/Downloads/نور وخروف العيد - حكايات بالعربي.pdf`
-- `/Users/abdullah/Downloads/قصة يوم العيد.pdf`
+Read from Omar's own downloads; recorded by title, because the machine path is
+not reproducible and the files are not in this repository.
+
+- `قصة من خير الناس.pdf`
+- `02-أين-رحلت-الشمس؟.pdf`
+- `نور وخروف العيد - حكايات بالعربي.pdf`
+- `قصة يوم العيد.pdf`
 
 Method:
 
@@ -114,7 +117,7 @@ Useful patterns:
 Defects to avoid:
 
 - Several pages exceed 50 words; two approach 70. This is too dense for the
-  current PDF caption layer and uneven for the stated age.
+  copy the model draws on the page, and uneven for the stated age.
 - Talking characters often deliver textbook explanations rather than distinct dialogue.
 - Ecological changes, water loss, oxygen loss, and body pain happen instantly.
 - Some scientific explanations are inaccurate or overstate the sun's direct role.
@@ -239,13 +242,13 @@ for 18 interior pages. It does **not** establish Hekayati's exact per-page caps.
 
 | Profile | Working target | Why it is set here |
 |---|---:|---|
-| `age-1-2` | 2-6 words/page; hard 10 | One action, repetition, caregiver read-aloud, and very large PDF caption type |
+| `age-1-2` | 2-6 words/page; hard 10 | One action, repetition, caregiver read-aloud, and very large lettering on the page's text surface |
 | `age-3-5` | 7-16 words/page; hard 22 | One or two short sentences, a simple causal beat, and one contextual new word |
-| `age-6-8` | 14-24 words/page; hard 32 | Two or three short sentences, full causal arc, and a legible PDF caption |
+| `age-6-8` | 14-24 words/page; hard 32 | Two or three short sentences, full causal arc, and lettering still legible at print size |
 
 The 18-page recommended totals are arithmetic products of those target ranges.
 They are deliberately tighter than many continuous web stories because
-Hekayati reserves a bounded caption band on each illustrated page. Age five
+Hekayati reserves a bounded text carrier inside each illustrated page. Age five
 spans very different reading
 abilities; use the stricter end of `age-3-5` for independent reading and the
 upper end for adult read-aloud.

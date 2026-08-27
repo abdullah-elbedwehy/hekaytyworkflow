@@ -80,8 +80,7 @@
     "orientation": "landscape",
     "shotScale": "multi-view reference sheet",
     "viewpoint": "orthographic-friendly reference layout",
-    "focalHierarchy": "faces and outfits first for every persona",
-    "captionSafeZone": "no text anywhere on this sheet. Keep the bottom band calm and low-detail — do not draw a box, band, or panel; this sheet carries no caption."
+    "focalHierarchy": "faces and outfits first for every persona"
   },
   "palette": "CHANGE: match story continuity palette",
   "continuity": {

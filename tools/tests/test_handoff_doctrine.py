@@ -293,6 +293,12 @@ class ManualDispatchTests(unittest.TestCase):
         "style": {"medium": "premium storybook illustration", "finish": "soft painterly"},
         "palette": "teal, sand, warm gold",
         "avoid": ["extra people"],
+        "inImageText": "أحمد عد لتلاتة.",
+        "textSurface": "لافتة خشب معلقة على سور الفناء",
+        "compiledPrompts": {
+            "chatgpt": "Ahmed counts to three in the school yard.",
+            "nanobanana": "Ahmed counts to three in the school yard.",
+        },
     }
 
     def test_instruction_is_self_contained(self) -> None:
@@ -306,12 +312,39 @@ class ManualDispatchTests(unittest.TestCase):
         self.assertIn("ولّد **page-05** بس", block)
         self.assertIn("ممنوع توليد أكتر من صفحة في نفس الرد", block)
 
-    def test_page_text_is_marked_as_context_not_art(self) -> None:
+    def test_the_page_copy_is_carried_as_art_not_as_a_caption(self) -> None:
+        """handoff §7 — the model draws the Arabic inside the picture."""
         block = manual_dispatch.render_manual_instruction(
             self.PROMPT, asset_id="page-05", page_text="أحمد عد لتلاتة."
         )
-        self.assertIn("متكتبوش في الصورة", block)
-        self.assertIn("ممنوع أي كتابة في الصورة", block)
+        self.assertIn("أحمد عد لتلاتة.", block)
+        self.assertIn("لافتة خشب معلقة على سور الفناء", block)
+        self.assertIn("ممنوع شريط سفلي", block)
+        # The wrapper must never tell the tool to leave the page wordless while
+        # the pasted prompt asks for the copy — that pair is what kept coming
+        # back empty.
+        self.assertNotIn("ممنوع أي كتابة في الصورة", block)
+
+    def test_a_prompt_that_lost_its_copy_says_so_instead_of_shipping(self) -> None:
+        payload = {key: value for key, value in self.PROMPT.items() if key != "inImageText"}
+        block = manual_dispatch.render_manual_instruction(
+            payload, asset_id="page-05", page_text="أحمد عد لتلاتة."
+        )
+        self.assertIn("compile-prompts", block)
+
+    def test_the_message_names_where_the_page_lands_in_the_book(self) -> None:
+        block = manual_dispatch.render_manual_instruction(
+            self.PROMPT, asset_id="page-05", page_text="أحمد عد لتلاتة.",
+            page_number=6, page_total=24,
+        )
+        self.assertIn("الصفحة ٦ من ٢٤", block)
+
+    def test_dispatch_without_a_compiled_prompt_is_refused(self) -> None:
+        payload = {
+            key: value for key, value in self.PROMPT.items() if key != "compiledPrompts"
+        }
+        with self.assertRaises(manual_dispatch.ManualDispatchError):
+            manual_dispatch.render_manual_instruction(payload, asset_id="page-05")
 
     def test_a_batch_file_never_exceeds_two_pages(self) -> None:
         blocks = [
@@ -325,6 +358,95 @@ class ManualDispatchTests(unittest.TestCase):
         block = manual_dispatch.render_character_sheet_instruction(self.PROMPT)
         for angle in doctrine.character_sheet_angles():
             self.assertIn(angle, block)
+
+
+
+class TextDoctrineDriftTests(unittest.TestCase):
+    """The one rule that has already drifted twice, pinned in every surface.
+
+    `doctrine.json` is the machine-readable law and `show-doctrine` serves it,
+    so an agent is told to prefer it over prose. It spent two doctrine changes
+    describing a PDF caption layer that no longer exists, because nothing
+    compared it to `handoff.md`. This is that comparison.
+    """
+
+    # Phrasings from the two retired modes. Both said the art comes back with
+    # no writing at all — one put the Arabic in a PDF text layer, the other
+    # projected it onto a blank in-scene carrier. The model draws it now.
+    RETIRED_AR = (
+        "طبقة نص حقيقية",
+        "كطبقة نص",
+        "الفن يطلع خالي من أي كتابة",
+        "الفن بيطلع خالي من أي كتابة",
+        "الفن كله خالي من أي كتابة",
+    )
+    RETIRED_EN = (
+        "art is text-free",
+        "illustrations come back text-free",
+        "the model draws a blank carrier",
+        "never ask the image model to write arabic",
+    )
+
+    def _strings(self, value, path="") -> list[tuple[str, str]]:
+        if isinstance(value, str):
+            return [(path, value)]
+        if isinstance(value, dict):
+            return [
+                item
+                for key, sub in value.items()
+                for item in self._strings(sub, f"{path}.{key}")
+            ]
+        if isinstance(value, list):
+            return [
+                item
+                for index, sub in enumerate(value)
+                for item in self._strings(sub, f"{path}[{index}]")
+            ]
+        return []
+
+    def test_no_doctrine_string_describes_a_retired_text_mode(self) -> None:
+        payload = json.loads(doctrine.DOCTRINE_PATH.read_text(encoding="utf-8"))
+        for path, text in self._strings(payload):
+            for retired in self.RETIRED_AR:
+                self.assertNotIn(retired, text, f"{path} still says «{retired}»")
+
+    def test_no_prose_file_describes_a_retired_text_mode(self) -> None:
+        targets = [
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / ".agents" / "skills" / "hekayati" / "SKILL.md",
+            *sorted((ROOT / "tools" / "references").rglob("*.md")),
+        ]
+        for path in targets:
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            relative = path.relative_to(ROOT)
+            for retired in self.RETIRED_AR:
+                self.assertNotIn(retired, text, f"{relative} still says «{retired}»")
+            for retired in self.RETIRED_EN:
+                self.assertNotIn(retired, lowered, f"{relative} still says «{retired}»")
+
+    def test_the_doctrine_names_the_two_prompt_fields_the_code_reads(self) -> None:
+        section = doctrine.doctrine_section("textInImage")
+        self.assertEqual("image-model", section["author"])
+        self.assertEqual("inImageText", section["promptFields"]["text"])
+        self.assertEqual("textSurface", section["promptFields"]["surface"])
+        self.assertTrue(section["referenceSheetsAreWordless"])
+
+    def test_doctrine_i2_and_handoff_i2_agree_on_the_surface_field(self) -> None:
+        lesson = next(
+            item
+            for item in doctrine.load_doctrine()["imageTool"]["lessons"]
+            if item["id"] == "I2"
+        )
+        self.assertIn("textSurface", lesson["ruleAr"])
+        handoff = doctrine.HANDOFF_PATH.read_text(encoding="utf-8")
+        i2_row = next(
+            line for line in handoff.splitlines() if line.startswith("| **I2**")
+        )
+        self.assertIn("textSurface", i2_row)
 
 
 class DoctrineCommandTests(unittest.TestCase):
@@ -425,12 +547,18 @@ class PrintSafePromptTests(unittest.TestCase):
     }
 
     def test_clause_is_compiled_into_the_prompt(self) -> None:
+        """The prompt carries a compact form of the clause, not the hex table.
+
+        Image prompts are length-bounded, so the doctrine's full §9 wording is
+        condensed for the model. What must survive is every rule it states: the
+        saturation ceiling, the black and navy bans, and natural skin tone.
+        """
         compiled = pipeline.build_compiled_prompt(
             dict(self.BASE), orientation="landscape"
-        )
-        self.assertIn("Print-safe palette", compiled)
-        self.assertIn("#2C3E50", compiled)
-        self.assertIn("#000000", compiled)
+        ).lower()
+        self.assertIn("print-safe palette", compiled)
+        for rule in ("saturation", "pure black", "deep navy", "natural skin"):
+            self.assertIn(rule, compiled)
 
     def test_clause_survives_the_length_shedding_pass(self) -> None:
         payload = dict(self.BASE)

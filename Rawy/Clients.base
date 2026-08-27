@@ -1,0 +1,61 @@
+filters:
+  and:
+    - file.inFolder("Clients")
+    - type == "rawy-client"
+formulas:
+  client: link(file.path, client_name)
+  status_label: if(status == "completed", "مكتمل / Completed", if(status == "waiting", "مستني / Waiting", if(status == "active", "شغّال / Active", "جديد / New")))
+properties:
+  formula.client:
+    displayName: العميل / Client
+  formula.status_label:
+    displayName: الحالة / Status
+  note.book_title:
+    displayName: الكتاب / Book
+  note.progress:
+    displayName: الإنجاز % / Progress
+  note.phase_label:
+    displayName: المرحلة / Phase
+  note.next_action:
+    displayName: الخطوة الجاية / Next action
+  note.blocker:
+    displayName: العائق / Blocker
+  note.deadline:
+    displayName: الموعد / Deadline
+  note.archived_at:
+    displayName: تاريخ الأرشفة / Archived
+  note.payment:
+    displayName: الدفع / Payment
+views:
+  - type: table
+    name: All
+    filters:
+      and:
+        - archived != true
+    order:
+      - formula.client
+      - book_title
+      - formula.status_label
+      - progress
+      - next_action
+  - type: cards
+    name: Needs attention
+    filters:
+      and:
+        - needs_attention == true
+        - status != "completed"
+        - archived != true
+    order:
+      - formula.client
+      - formula.status_label
+      - next_action
+      - blocker
+  - type: table
+    name: Archived
+    filters:
+      and:
+        - archived == true
+    order:
+      - formula.client
+      - book_title
+      - archived_at

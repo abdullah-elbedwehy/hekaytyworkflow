@@ -256,7 +256,7 @@ class StoryReviewWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT) as raw_project:
             nested_project = Path(raw_project).resolve()
             with self.assertRaisesRegex(
-                pipeline.WorkflowError, "cannot live inside.*Git repository"
+                pipeline.WorkflowError, "allowed only under.*Rawy/Clients"
             ):
                 pipeline.command_init(
                     argparse.Namespace(project=nested_project, pages=handoff_fixture.PDF_PAGE_COUNT)

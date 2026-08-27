@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "assetId": "page-01",
   "version": 1,
   "useCase": "illustration-story",
@@ -101,9 +101,26 @@
     "viewpoint": "CHANGE: eye-level|low|high — must differ from adjacent pages",
     "focalHierarchy": "CHANGE: who/what eye hits first, second, third",
     "lens": "CHANGE: lens feel, e.g. 35mm-equivalent slight wide, no distortion at the edges",
-    "depthOfField": "CHANGE: what is sharp and what falls soft, e.g. child sharp, background softly out of focus",
-    "captionSafeZone": "bottom band of the frame stays calm and low-detail: no faces, hands, or key action there. Do not draw a box, band, or panel — the caption is added later as a real PDF text layer."
+    "depthOfField": "CHANGE: what is sharp and what falls soft, e.g. child sharp, background softly out of focus"
   },
+  "inImageText": "CHANGE: the page's exact approved Arabic, character for character, copied from story.json — or \"\" on a reference sheet",
+  "textSurface": "CHANGE: the in-scene surface the copy is printed on — pinned paper note, hanging cloth banner, wooden sign, window sill, chalkboard",
+  "gameSpec": {
+    "kind": "CHANGE: maze | spot-the-difference | search-and-find — delete this whole block on a non-game page",
+    "startDescription": "CHANGE (maze): where the route begins",
+    "goalDescription": "CHANGE (maze): where the route ends",
+    "differenceCount": 5,
+    "differences": [
+      "CHANGE (spot-the-difference): one whole-object change a child can name"
+    ],
+    "targetItems": [
+      "CHANGE (search-and-find): one target item with its exact count"
+    ],
+    "elements": [
+      "CHANGE: every game element and where it sits — the agent writes these, the tool invents none"
+    ]
+  },
+  "learnedRuleIds": [],
   "palette": "CHANGE once in story continuity, reuse with beat emphasis only",
   "colorScript": "CHANGE: how this beat shifts the base palette — which one colour leans warmer/cooler/more saturated and why the beat calls for it. Never a new palette.",
   "continuity": {
@@ -118,7 +135,8 @@
     "one shared visible moment",
     "landscape full-bleed full-page illustration (wider than tall)",
     "describe every visible layer: foreground, midground, background, props",
-    "no text, letters, numbers, or signage anywhere in the image"
+    "the page's approved Arabic is drawn inside the artwork on the named textSurface, right-to-left with joined letters, exactly as written",
+    "no other surface in the frame carries writing, and no bottom caption band, white strip, lower scrim, or text layer over the art"
   ],
   "avoid": [
     "extra people",

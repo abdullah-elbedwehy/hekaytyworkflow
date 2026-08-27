@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "type": "file",
+      "path": "Dashboard.md",
+      "title": "Rawy / راوي"
+    },
+    {
+      "type": "file",
+      "path": "Clients.base",
+      "title": "Clients / العملاء"
+    }
+  ]
+}

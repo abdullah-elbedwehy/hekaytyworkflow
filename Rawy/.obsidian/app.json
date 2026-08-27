@@ -1,0 +1,19 @@
+{
+  "rightToLeft": false,
+  "readableLineLength": false,
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "attachmentFolderPath": "./",
+  "showUnsupportedFiles": false,
+  "strictLineBreaks": false,
+  "showLineNumber": false,
+  "spellcheck": false,
+  "livePreview": true,
+  "defaultViewMode": "preview",
+  "showInlineTitle": false,
+  "propertiesInDocument": "visible",
+  "userIgnoreFilters": [
+    "/\\/(prompts|style|renders|contact-sheets|reviews|__pycache__)\\//"
+  ]
+}

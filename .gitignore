@@ -18,14 +18,34 @@ htmlcov/
 **/output/
 **/clients/
 
+# Rawy private operator state. The shell is tracked; customer data is not.
+/Rawy/Clients/
+/Rawy/.rawy/
+# Generated from client notes, so it carries real client names and book titles.
+/Rawy/Archive.md
+
 # The Codex image skill is installed per user; never commit an absolute symlink.
 .cursor/skills/codex-imagegen
 
-# Obsidian: the vault config is shared, the per-machine workspace state is not.
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
+# Obsidian: the vault config is shared, the per-machine pane state is not.
+# A pattern with a slash is anchored, so Rawy needs its own entries.
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json
 .obsidian/graph-state.json
 .trash/
+
+# Scratch renders and proofs. These are pages of real books.
+tmp/
+
+# Local tool caches, regenerated on demand.
+.impeccable/
+
+# One-off client build scripts. They carry a home-directory project path, real
+# persona photo filenames, and a whole client prompt pack — none of which may
+# enter a tracked file (AGENTS.md, "Data boundaries"). Sanitize into a general
+# builder before tracking anything like this.
+tools/scripts/build_abdullah_prompts.py
+tools/scripts/build_abdullah2_prompts.py
 
 # Copyrighted source material and derived local research stay local.
 tools/.corpus/

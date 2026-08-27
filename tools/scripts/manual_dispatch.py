@@ -1,19 +1,29 @@
-"""Render one self-contained image instruction for the manual ChatGPT lane.
+"""Render one self-contained image instruction for the manual image lane.
 
-Handoff §8: the phone tool has no state. Every message must carry the whole job
-on its own — the reference-sheet clause, the exact scene, the orientation, and
-the one-page-per-reply stop. This module turns a compiled prompt JSON into
-exactly that block, ready to paste, with nothing left implicit.
+Handoff §8 I1: the image tool has no state. Every message must carry the whole
+job on its own — which files to attach, the prompt itself, the Arabic that has
+to appear inside the artwork, and the one-page-per-reply stop.
 
-The automated Codex lane is unchanged; this is the export for the way Omar
-actually generates art today.
+The block is deliberately thin. Everything about *the picture* — scene layers,
+staging, camera, style, palette, constraints — is already compiled into the
+prompt at the end of the message, in the phrasing the chosen tool reads best.
+Restating all of it in Arabic above the prompt doubled the length of every
+dispatch and, worse, drifted: the Arabic wrapper and the English prompt started
+giving the tool opposite instructions about the page text. So the wrapper now
+carries only what the *operator* does — attach, paste, check, stop — and the
+prompt carries the page.
+
+That also makes the block portable. Nothing in it depends on this repository,
+this machine, or this conversation, so the same message works pasted into
+ChatGPT, into Nano Banana, or handed to somebody else's agent.
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 import doctrine
+import prompt_targets
 
 
 class ManualDispatchError(RuntimeError):
@@ -22,18 +32,20 @@ class ManualDispatchError(RuntimeError):
 
 _SEPARATOR = "─" * 46
 
+ARABIC_INDIC = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
 
 def _clean(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
-def _lines(values: Iterable[Any], bullet: str = "- ") -> list[str]:
-    out: list[str] = []
-    for value in values:
-        text = _clean(value)
-        if text:
-            out.append(f"{bullet}{text}")
-    return out
+def _is_placeholder(value: str) -> bool:
+    """True for a template field nobody filled in (`CHANGE: …`)."""
+    return value.upper().startswith("CHANGE")
+
+
+def _ar(number: Any) -> str:
+    return str(number).translate(ARABIC_INDIC)
 
 
 def reference_attachments(
@@ -48,7 +60,7 @@ def reference_attachments(
                 continue
             path = _clean(entry.get("path"))
             role = _clean(entry.get("role")) or "reference"
-            if not path or path.upper().startswith("CHANGE"):
+            if not path or _is_placeholder(path):
                 continue
             attachments.append({"role": role, "path": path})
     if character_sheet_path and not any(
@@ -58,65 +70,99 @@ def reference_attachments(
     return attachments
 
 
-def _scene_block(prompt: Mapping[str, Any]) -> list[str]:
-    scene = prompt.get("scene")
-    if not isinstance(scene, Mapping):
-        return []
-    labels = (
-        ("place", "المكان"),
-        ("timeOfDay", "الوقت والضوء"),
-        ("atmosphere", "الجو"),
-        ("lighting", "الإضاءة"),
-        ("foreground", "المقدمة"),
-        ("midground", "الوسط"),
-        ("background", "الخلفية"),
-        ("backdropDetails", "تفاصيل الخلفية"),
-    )
-    rows = [f"- {label}: {_clean(scene.get(key))}" for key, label in labels if _clean(scene.get(key))]
-    props = scene.get("propsInFrame")
-    if isinstance(props, list):
-        prop_lines = _lines(props, bullet="  • ")
-        if prop_lines:
-            rows.append("- العناصر الظاهرة:")
-            rows.extend(prop_lines)
-    return rows
+def _placement_line(
+    asset_id: str, role_label: str, page_number: Any, page_total: Any
+) -> str:
+    """Where this asset sits in the finished book.
+
+    Somebody generating art outside the pipeline gets a folder of images with no
+    order in it. Naming the slot in the title is what lets them file the result
+    without asking.
+    """
+    title = f"# {asset_id} · {role_label}"
+    try:
+        number = int(page_number)
+        total = int(page_total)
+    except (TypeError, ValueError):
+        return title
+    if number <= 0 or total <= 0:
+        return title
+    return f"{title} — الصفحة {_ar(number)} من {_ar(total)} في الـPDF"
 
 
-def _people_block(prompt: Mapping[str, Any]) -> list[str]:
+def _in_image_text(prompt: Mapping[str, Any]) -> str:
+    """The exact Arabic the artwork has to contain (handoff §7)."""
+    value = prompt.get("inImageText")
+    text = str(value).strip() if isinstance(value, str) else ""
+    return "" if _is_placeholder(text) else text
+
+
+def _text_block(prompt: Mapping[str, Any], page_text: str | None) -> list[str]:
+    """The in-image copy section, or a loud gap if the prompt lost the copy."""
+    copy = _in_image_text(prompt)
+    approved = _clean(page_text)
+    if not copy:
+        if approved:
+            # validate-prompts refuses this, so it should never reach an
+            # operator. If it does, saying so beats shipping a page that
+            # silently prints without its story text.
+            return [
+                "- ⚠️ الصفحة ليها نص معتمد بس البرومبت مش شايله. "
+                "شغّل `compile-prompts` تاني قبل ما تولّد أي حاجة.",
+            ]
+        return ["- الصورة دي بترجع من غير أي كتابة — كل سطح في الكادر فاضي."]
+    surface = _clean(prompt.get("textSurface"))
+    where = f"على «{surface}»" if surface and not _is_placeholder(surface) else "على سطح موجود في المشهد"
+    return [
+        f"- النص العربي متكتوب جوه الرسمة نفسها {where}، حرف بحرف زي ما هو تحت:",
+        "",
+        "```",
+        copy,
+        "```",
+        "",
+        "- ممنوع شريط سفلي، ولا بانل، ولا طبقة نص فوق الصورة. الكلام جزء من الرسمة.",
+    ]
+
+
+def _acceptance_block(
+    prompt: Mapping[str, Any], page_text: str | None, *, has_people: bool
+) -> list[str]:
+    """What to look at before accepting the render — one line per failure mode."""
     rows: list[str] = []
-    participants = prompt.get("participants")
-    action = prompt.get("actionAndEmotion") if isinstance(prompt.get("actionAndEmotion"), Mapping) else {}
-    outfits = prompt.get("fixedOutfits") if isinstance(prompt.get("fixedOutfits"), Mapping) else {}
-    if isinstance(participants, list):
-        for entry in participants:
-            if not isinstance(entry, Mapping) or entry.get("onPage") is False:
-                continue
-            persona_id = _clean(entry.get("id"))
-            name = _clean(entry.get("displayName")) or persona_id
-            if not name or name.upper().startswith("CHANGE"):
-                continue
-            rows.append(f"- {name} ({persona_id}):")
-            outfit = _clean(outfits.get(persona_id)) if isinstance(outfits, Mapping) else ""
-            if outfit and not outfit.upper().startswith("CHANGE"):
-                rows.append(f"  • اللبس الثابت: {outfit}")
-            beat = action.get(persona_id) if isinstance(action, Mapping) else None
-            if isinstance(beat, Mapping):
-                if _clean(beat.get("action")):
-                    rows.append(f"  • الحركة: {_clean(beat.get('action'))}")
-                if _clean(beat.get("emotion")):
-                    rows.append(f"  • الإحساس: {_clean(beat.get('emotion'))}")
-    guests = prompt.get("guests")
-    if isinstance(guests, list):
-        for guest in guests:
-            if not isinstance(guest, Mapping):
-                continue
-            notes = _clean(guest.get("appearanceNotes"))
-            if not notes or notes.upper().startswith("CHANGE"):
-                continue
-            name = _clean(guest.get("displayName")) or "ضيف"
-            rows.append(f"- {name} (ضيف — بالوصف بس، من غير أي اسم علامة تجارية):")
-            rows.append(f"  • {notes}")
+    if _in_image_text(prompt):
+        rows.append(
+            "- [ ] النص العربي مطابق حرف بحرف: مش معكوس، الحروف موصولة، "
+            "مفيش كلمة زايدة ولا ناقصة، ومفيش كلام خارج حدود السطح."
+        )
+    if has_people:
+        rows.append(
+            "- [ ] وش وشعر ولبس كل شخص زي الـReference Sheet بالظبط، "
+            "ومحدش خد ملامح حد تاني."
+        )
+    canary = prompt_targets.tail_check(prompt)
+    if canary:
+        # Both tools silently ignore the tail of a long instruction, and a
+        # dropped tail is invisible — the art still looks finished. So the
+        # operator gets one element the page already requires to look for.
+        rows.append(
+            f"- [ ] «{canary}» ظاهر في الصورة. لو مش موجود، الأداة قصّت آخر "
+            "التعليمة — ابعت الرسالة تاني كاملة من غير أي حذف."
+        )
+    rows.append(f"- [ ] الألوان: {doctrine.print_safe_clause('ar')}")
+    rows.append("- [ ] مفيش أشخاص زيادة عن المذكورين، ومفيش أي علامة تجارية.")
     return rows
+
+
+def _shape_rows(profile: prompt_targets.TargetProfile) -> list[str]:
+    orientation = doctrine.required_orientation()
+    ratio = doctrine.required_aspect_ratio()
+    line = f"- الاتجاه: {orientation} {ratio} — ممنوع بالطول."
+    if profile.aspect_ratio_in_prompt:
+        line += f" والنسبة مكتوبة جوه البرومبت نفسه: aspect ratio {ratio}."
+    return [
+        line,
+        "- مشهد واحد في صورة واحدة، full-bleed لصفحة كاملة. ممنوع فريم مقسوم أو لقطتين.",
+    ]
 
 
 def render_manual_instruction(
@@ -125,141 +171,104 @@ def render_manual_instruction(
     asset_id: str,
     page_text: str | None = None,
     page_role: str = "story",
+    page_number: Any = None,
+    page_total: Any = None,
     character_sheet_path: str | None = None,
     next_asset_id: str | None = None,
+    target: str = prompt_targets.DEFAULT_TARGET,
 ) -> str:
-    """One paste-ready Arabic message for a single page (handoff §8 I1/I3/I5/I7)."""
+    """One paste-ready Arabic message for a single page (handoff §8 I1/I3/I5/I7).
+
+    ``target`` chooses which image tool the message is written for. Only the
+    pasted prompt changes with it — the operator steps are the same everywhere,
+    which is what keeps the two lanes from drifting apart.
+    """
     if not isinstance(prompt, Mapping):
         raise ManualDispatchError("prompt payload must be an object")
     asset_id = _clean(asset_id)
     if not asset_id:
         raise ManualDispatchError("asset_id is required")
+    try:
+        profile = prompt_targets.profile(target)
+    except prompt_targets.TargetError as exc:
+        raise ManualDispatchError(str(exc)) from exc
 
-    orientation = doctrine.required_orientation()
-    ratio = doctrine.required_aspect_ratio()
     role_label = doctrine.role_label_ar(page_role)
-
-    header = [
-        f"# تعليمة توليد صورة واحدة — {asset_id} ({role_label})",
+    lines: list[str] = [
+        _placement_line(asset_id, role_label, page_number, page_total),
         "",
-        "> رسالة واحدة كاملة بذاتها. متفترضش إن الأداة فاكرة أي حاجة من رسالة قبل كده.",
+        f"> الأداة: **{profile.label}**.",
+        "> الرسالة دي كاملة بذاتها. الأداة مش شايفة أي رسالة قبل كده، "
+        "فمتعتمدش على أي حاجة اتقالت قبل الرسالة دي.",
         "",
+        "## ١) ارفع المرفقات بالترتيب ده",
     ]
 
     attachments = reference_attachments(prompt, character_sheet_path=character_sheet_path)
-    body: list[str] = ["## 1) المرفقات (بالترتيب ده بالظبط)"]
     rows = [f"[{item['role']}] {item['path']}" for item in attachments]
-    # handoff §8 I3: the sheet goes on every single message. If the accepted
-    # sheet path is not known yet, say so loudly instead of shipping a message
-    # that silently omits the one attachment that stops identity drift.
+    # handoff §8 I3: the accepted sheet goes on every single message. If its path
+    # is not known yet, say so loudly instead of shipping a message that silently
+    # omits the one attachment that stops identity drift.
     if not any(item["role"] == "character-sheet" for item in attachments):
-        rows.append("[character-sheet] ⚠️ ارفق شيت الشخصية المعتمد — إلزامي في كل رسالة")
-    body.extend(f"{index}. {row}" for index, row in enumerate(rows, start=1))
-    body.extend(
+        rows.append("⚠️ ارفق شيت الشخصية المعتمد — إلزامي في كل رسالة")
+    lines.extend(f"{index}. {row}" for index, row in enumerate(rows, start=1))
+    lines.extend(
         [
             "",
-            "## 2) قاعدة المرجع (إلزامية في كل رسالة)",
-            doctrine.reference_sheet_clause(),
+            f"**قاعدة المرجع (إلزامية في كل رسالة):** {doctrine.reference_sheet_clause()}",
             "لو حصل تعارض بين «الواقعية» و«مطابقة الـReference Sheet» → المطابقة تكسب.",
             "",
-            f"## 3) الشكل",
-            f"- الاتجاه: {orientation} {ratio} — ممنوع بالطول.",
-            "- مشهد واحد = صورة واحدة. ممنوع تقسيم لقطات أو فريم مقسوم.",
-            "- صورة full-bleed لصفحة كاملة.",
-            "",
         ]
     )
 
-    beat = _clean(prompt.get("narrativeBeat"))
-    request = _clean(prompt.get("primaryRequest"))
-    body.append("## 4) المشهد")
-    if beat:
-        body.append(f"- دور الصفحة: {beat}")
-    if request:
-        body.append(f"- الحركة الأساسية: {request}")
-    body.extend(_scene_block(prompt))
-
-    people = _people_block(prompt)
-    if people:
-        body.extend(["", "## 5) الناس في الكادر", *people])
-
-    staging = _clean(prompt.get("spatialStaging"))
-    if staging and not staging.upper().startswith("CHANGE"):
-        body.extend(["", f"- التوزيع في الكادر: {staging}"])
-
-    composition = prompt.get("composition")
-    if isinstance(composition, Mapping):
-        comp_rows = [
-            f"- {label}: {_clean(composition.get(key))}"
-            for key, label in (
-                ("shotScale", "حجم اللقطة"),
-                ("viewpoint", "زاوية الكاميرا"),
-                ("focalHierarchy", "ترتيب النظر"),
-                ("lens", "العدسة"),
-                ("depthOfField", "عمق الميدان"),
-            )
-            if _clean(composition.get(key)) and not _clean(composition.get(key)).upper().startswith("CHANGE")
-        ]
-        if comp_rows:
-            body.extend(["", "## 6) الكاميرا", *comp_rows])
-
-    style = prompt.get("style")
-    if isinstance(style, Mapping):
-        style_rows = _lines(
-            value
-            for value in (style.get("medium"), style.get("finish"))
-            if _clean(value) and not _clean(value).upper().startswith("CHANGE")
+    try:
+        compiled = prompt_targets.compiled_for(prompt, target)
+    except prompt_targets.TargetError:
+        compiled = ""
+    if not compiled:
+        raise ManualDispatchError(
+            f"{asset_id} has no compiled prompt for target '{profile.id}'. "
+            "Run compile-prompts before dispatching."
         )
-        if style_rows:
-            body.extend(["", "## 7) الستايل", *style_rows])
+    lines.extend(
+        [
+            "## ٢) الزق البرومبت ده زي ما هو، من غير أي حذف ولا اختصار",
+            "",
+            "```text",
+            compiled,
+            "```",
+            "",
+            "## ٣) اللي لازم يرجع",
+            *_shape_rows(profile),
+        ]
+    )
+    lines.extend(_text_block(prompt, page_text))
 
-    palette = _clean(prompt.get("palette"))
-    color_script = _clean(prompt.get("colorScript"))
-    body.extend(["", "## 8) الألوان (آمنة للطباعة — إلزامي)"])
-    if palette and not palette.upper().startswith("CHANGE"):
-        body.append(f"- باليت القصة: {palette}")
-    if color_script and not color_script.upper().startswith("CHANGE"):
-        body.append(f"- انحياز الباليت في الصفحة دي: {color_script}")
-    body.append(f"- {doctrine.print_safe_clause('ar')}")
-
-    body.extend(
+    participants = prompt.get("participants")
+    has_people = bool(
+        isinstance(participants, list)
+        and [
+            entry
+            for entry in participants
+            if isinstance(entry, Mapping) and entry.get("onPage") is not False
+        ]
+    )
+    lines.extend(
         [
             "",
-            "## 9) ممنوعات",
-            "- ممنوع أي كتابة في الصورة: كلام، حروف، أرقام، لافتات، أغلفة كتب، لوجوهات.",
-            "- الشريط السفلي من الكادر يفضل هادي وفاضي — من غير وشوش ولا أيدي ولا حركة مهمة، ومن غير أي مربع أو بانل مرسوم.",
-            "- ممنوع أسماء شخصيات مرخصة، لا بالعربي ولا باللاتيني.",
-            "- ممنوع أشخاص زيادة عن المذكورين فوق.",
+            "## ٤) اتأكد من ده قبل ما تقبل الصورة",
+            *_acceptance_block(prompt, page_text, has_people=has_people),
+            "",
+            _SEPARATOR,
+            "## اوقف هنا",
+            f"ولّد **{asset_id}** بس، وابعت الصورة، واستنى تأكيدي.",
         ]
     )
-    avoid_rows = _lines(prompt.get("avoid") or [], bullet="- ")
-    if avoid_rows:
-        body.extend(avoid_rows[:12])
-
-    if page_text and _clean(page_text):
-        body.extend(
-            [
-                "",
-                "## 10) نص الصفحة (للسياق بس — متكتبوش في الصورة)",
-                "> النص بيتحط كطبقة نص حقيقية في الـPDF، مش في الرسمة.",
-                "",
-                "```",
-                _clean(page_text),
-                "```",
-            ]
-        )
-
-    stop = [
-        "",
-        _SEPARATOR,
-        f"## اوقف هنا",
-        f"ولّد **{asset_id}** بس، وابعت الصورة. اوقف واستنى تأكيدي.",
-    ]
     if next_asset_id:
-        stop.append(f"متولّدش {_clean(next_asset_id)} غير لما أقولك.")
-    stop.append("ممنوع توليد أكتر من صفحة في نفس الرد.")
+        lines.append(f"متولّدش {_clean(next_asset_id)} غير لما أقولك.")
+    lines.append("ممنوع توليد أكتر من صفحة في نفس الرد.")
 
-    return "\n".join([*header, *body, *stop]).rstrip() + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def render_batch_file(blocks: list[Mapping[str, str]]) -> str:
@@ -285,37 +294,75 @@ def render_batch_file(blocks: list[Mapping[str, str]]) -> str:
 
 
 def render_character_sheet_instruction(
-    prompt: Mapping[str, Any], *, asset_id: str = "character-sheet", hero_only: bool = True
+    prompt: Mapping[str, Any],
+    *,
+    asset_id: str = "character-sheet",
+    hero_only: bool = True,
+    target: str = prompt_targets.DEFAULT_TARGET,
 ) -> str:
-    """Handoff §8 I8 — hero sheet is solo, supporting cast share one sheet."""
+    """Handoff §8 I8 — hero sheet is solo, supporting cast share one sheet.
+
+    A sheet is the one asset that carries no copy at all: it exists to lock
+    faces and outfits, and any writing on it would be copied onto every page
+    that later uses it as a reference.
+    """
+    try:
+        profile = prompt_targets.profile(target)
+    except prompt_targets.TargetError as exc:
+        raise ManualDispatchError(str(exc)) from exc
     angles = "، ".join(doctrine.character_sheet_angles())
     subject = "البطل لوحده" if hero_only else "كل الشخصيات المساندة مع بعض في شيت واحد"
     lines = [
-        f"# تعليمة توليد شيت شخصية — {asset_id}",
+        f"# {asset_id} · شيت شخصية — مرجع ثابت لكل صفحات الكتاب",
         "",
-        f"- الشيت ده لـ: {subject}.",
-        f"- أربع زوايا في نفس الشيت: {angles}.",
-        f"- الاتجاه: {doctrine.required_orientation()} {doctrine.required_aspect_ratio()}.",
-        "- خلفية بيضا/محايدة، من غير أي كتابة ولا أرقام ولا تسميات.",
-        "- نفس اللبس الثابت في كل الزوايا.",
+        f"> الأداة: **{profile.label}**.",
+        "> الرسالة دي كاملة بذاتها.",
         "",
-        "## المرجع",
+        "## ١) ارفع المرفقات بالترتيب ده",
     ]
     attachments = reference_attachments(prompt)
     if attachments:
-        lines.extend(f"{i}. [{a['role']}] {a['path']}" for i, a in enumerate(attachments, start=1))
+        lines.extend(
+            f"{index}. [{item['role']}] {item['path']}"
+            for index, item in enumerate(attachments, start=1)
+        )
     else:
         lines.append("1. ارفق صور الطفل الحقيقية")
+    lines.extend(["", "حوّل الطفل لشخصية كرتونية مطابقة، وثبّت الملامح دي كمرجع نهائي لكل صفحات الكتاب.", ""])
+
+    try:
+        compiled = prompt_targets.compiled_for(prompt, target)
+    except prompt_targets.TargetError:
+        compiled = ""
+    if compiled:
+        lines.extend(
+            [
+                "## ٢) الزق البرومبت ده زي ما هو",
+                "",
+                "```text",
+                compiled,
+                "```",
+                "",
+            ]
+        )
     lines.extend(
         [
+            "## ٣) اللي لازم يرجع",
+            f"- {subject}.",
+            f"- أربع زوايا في نفس الشيت: {angles}.",
+            f"- الاتجاه: {doctrine.required_orientation()} {doctrine.required_aspect_ratio()}.",
+            "- خلفية بيضا/محايدة، ونفس اللبس الثابت في كل الزوايا.",
+            "- الشيت من غير أي كتابة ولا أرقام ولا تسميات — أي كلام هنا هيتنسخ "
+            "على كل صفحة بتستعمل الشيت ده كمرجع.",
             "",
-            "حوّل الطفل لشخصية كرتونية مطابقة، وثبّت الملامح دي كمرجع نهائي لكل صفحات الكتاب.",
-            "",
-            "## الألوان",
-            doctrine.print_safe_clause("ar"),
+            "## ٤) اتأكد من ده قبل ما تقبل الصورة",
+            "- [ ] الأربع زوايا كلهم ظاهرين ونفس الشخصية في الأربعة.",
+            "- [ ] مفيش أي كتابة ولا لوجو ولا واترمارك.",
+            f"- [ ] الألوان: {doctrine.print_safe_clause('ar')}",
             "",
             _SEPARATOR,
-            f"ولّد {asset_id} بس، وابعته، واستنى تأكيدي.",
+            "## اوقف هنا",
+            f"ولّد **{asset_id}** بس، وابعته، واستنى تأكيدي.",
         ]
     )
     return "\n".join(lines) + "\n"

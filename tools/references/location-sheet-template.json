@@ -40,8 +40,7 @@
     "orientation": "landscape",
     "shotScale": "establishing wide + angle studies",
     "viewpoint": "eye-level establishing plus one high and one low study",
-    "focalHierarchy": "architecture and fixed landmarks first — this sheet exists to lock geometry, not mood",
-    "captionSafeZone": "no text anywhere on this sheet. Keep the bottom band calm and low-detail — do not draw a box, band, or panel; this sheet carries no caption."
+    "focalHierarchy": "architecture and fixed landmarks first — this sheet exists to lock geometry, not mood"
   },
   "palette": "CHANGE: this location's locked palette — pages may re-light it but not repaint it",
   "continuity": {

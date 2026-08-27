@@ -1,10 +1,10 @@
-"""End-to-end proof that the book's Arabic survives as real PDF text.
+"""End-to-end proof that the book's Arabic survives as recoverable PDF text.
 
-The whole point of drawing captions as a text layer instead of painting them
-into the art is that they stay selectable and editable. That property is
-invisible on screen — a PDF whose text layer silently failed looks identical to
-one that works — so it gets an integration test that builds an actual PDF and
-reads the words back out.
+The visible Arabic is composed *inside* the illustration — there is no caption
+overlay. The PDF still carries the same string invisibly so copy, search, and
+`verify` keep working. That property is invisible on screen — a PDF whose text
+layer silently failed looks identical to one that works — so it gets an
+integration test that builds an actual PDF and reads the words back out.
 """
 
 from __future__ import annotations
@@ -45,11 +45,19 @@ class PdfTextLayerTests(unittest.TestCase):
         (self.project / "output" / "images").mkdir(parents=True)
         self.page_size = (1200, 800)
 
-    def _image(self, name: str) -> str:
-        """A plain painted page — stands in for a generated illustration."""
+    def _image(self, name: str, *, composited: bool = True) -> str:
+        """A plain painted page — stands in for a generated illustration.
+
+        Pages ship from ``output/images/composited/``: the story text is already
+        painted into the art by ``resolve-text-surface`` before the PDF is built.
+        """
         from PIL import Image
 
-        path = self.project / "output" / "images" / name
+        directory = self.project / "output" / "images"
+        if composited:
+            directory = directory / "composited"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / name
         Image.new("RGB", self.page_size, (140, 170, 200)).save(path)
         return str(path.relative_to(self.project))
 
@@ -142,16 +150,27 @@ class PdfTextLayerTests(unittest.TestCase):
             asset.setdefault("versions", [])
         return book
 
+    def _approve_images(self) -> None:
+        """The operator's sign-off on the artwork; `build` refuses without it."""
+        import argparse
+
+        pipeline.command_approve_images(
+            argparse.Namespace(
+                project=self.project, statement="شوفت الصور كلها وموافق"
+            )
+        )
+
     def _build(self) -> dict:
         import argparse
 
         book = self._book()
         pipeline.save_book(self.project, book)
+        self._approve_images()
         return pipeline.command_build(
             argparse.Namespace(project=self.project, edition="draft")
         )
 
-    def test_caption_is_drawn_only_on_pages_that_carry_story_text(self) -> None:
+    def test_text_is_recorded_only_on_pages_that_carry_story_text(self) -> None:
         result = self._build()
         self.assertEqual(1, result["captionCount"])
         self.assertEqual("page-01", result["captions"][0]["assetId"])
@@ -166,7 +185,7 @@ class PdfTextLayerTests(unittest.TestCase):
         recovered = pipeline.page_caption_text(reader.pages[1])
         self.assertEqual(PAGE_TEXT, recovered)
 
-    def test_pages_without_story_text_carry_no_caption(self) -> None:
+    def test_pages_without_story_text_carry_no_recoverable_text(self) -> None:
         from pypdf import PdfReader
 
         result = self._build()
@@ -191,11 +210,11 @@ class PdfTextLayerTests(unittest.TestCase):
                 embedded.append(str(resolved["/BaseFont"]))
         self.assertTrue(
             embedded,
-            "caption font is not embedded — the PDF would not render off this machine",
+            "Arabic font is not embedded — the PDF would not render off this machine",
         )
         self.assertTrue(
             any("Cairo" in name or "Amiri" in name for name in embedded),
-            f"unexpected embedded caption font: {embedded}",
+            f"unexpected embedded Arabic font: {embedded}",
         )
 
     def test_verify_rejects_a_pdf_whose_text_layer_is_missing(self) -> None:
@@ -245,7 +264,7 @@ class PdfTextLayerTests(unittest.TestCase):
         pipeline.command_verify(
             argparse.Namespace(project=self.project, edition="draft")
         )
-        changed = self.project / "output" / "images" / "page-01.png"
+        changed = self.project / "output" / "images" / "composited" / "page-01.png"
         Image.new("RGB", self.page_size, (10, 20, 30)).save(changed)
         book = pipeline.load_book(self.project)
         pipeline.invalidate_pdf_and_reviews(book)
@@ -263,7 +282,9 @@ class PdfTextLayerTests(unittest.TestCase):
         pipeline.command_verify(
             argparse.Namespace(project=self.project, edition="draft")
         )
-        changed = self.project / "output" / "images" / "page-01.png"
+        changed = (
+            self.project / "output" / "images" / "composited" / "page-01.png"
+        )
         Image.new("RGB", self.page_size, (30, 20, 10)).save(changed)
         with self.assertRaisesRegex(pipeline.WorkflowError, "older page images"):
             pipeline.command_verify(
@@ -431,22 +452,77 @@ class PdfTextLayerTests(unittest.TestCase):
         self.assertEqual("passed", final_book["review"]["status"])
         self.assertEqual([], final_book["review"]["manualReview"])
 
-    def test_caption_lands_inside_the_declared_safe_zone(self) -> None:
-        """The band the illustration was told to keep clear is the band used."""
-        page_width, page_height = 1200.0, 800.0
-        zone = textlayout.safe_zone_rect(page_width, page_height)
-        font = pipeline.register_caption_font({})
-        from reportlab.pdfbase import pdfmetrics
+    def test_story_text_is_never_drawn_over_the_art(self) -> None:
+        """No caption overlay: the visible glyphs live in the composited image."""
+        result = self._build()
+        self.assertEqual("in-image", result["captions"][0]["mode"])
+        self.assertFalse(result["captions"][0]["visible"])
+        self.assertFalse(hasattr(pipeline, "draw_caption"))
+        self.assertFalse(hasattr(textlayout, "safe_zone_rect"))
 
-        layout = textlayout.layout_caption(
-            PAGE_TEXT,
-            zone,
-            lambda text, size: pdfmetrics.stringWidth(text, font, size),
+    def test_an_in_image_page_builds_from_its_raw_render(self) -> None:
+        """The model drew the Arabic, so the render that came back is the page."""
+        import argparse
+
+        book = self._book()
+        for asset in book["assets"]:
+            if asset["id"] == "page-01":
+                asset["imagePath"] = self._image("raw-page-01.png", composited=False)
+        pipeline.save_book(self.project, book)
+        self._approve_images()
+        result = pipeline.command_build(
+            argparse.Namespace(project=self.project, edition="draft")
         )
-        for line in layout.lines:
-            self.assertGreaterEqual(line.x, zone.x)
-            self.assertLessEqual(line.baseline, zone.top)
-            self.assertGreaterEqual(line.baseline, zone.y)
+        self.assertEqual(1, result["captionCount"])
+        self.assertEqual(PAGE_TEXT, result["captions"][0]["text"])
+
+    def test_a_page_authored_with_a_carrier_plan_still_needs_its_composite(self) -> None:
+        """Books written before the change had the text projected on afterwards."""
+        import argparse
+
+        book = self._book()
+        for asset in book["assets"]:
+            if asset["id"] == "page-01":
+                asset["imagePath"] = self._image("raw-page-01.png", composited=False)
+        pipeline.save_book(self.project, book)
+        prompts = self.project / "input" / "prompts"
+        prompts.mkdir(parents=True, exist_ok=True)
+        pipeline.atomic_json(
+            prompts / "page-01.v01.json",
+            {"assetId": "page-01", "textIntegration": {"mode": "scene-surface"}},
+        )
+        self._approve_images()
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            pipeline.command_build(
+                argparse.Namespace(project=self.project, edition="draft")
+            )
+        self.assertIn("blank-carrier plan", str(caught.exception))
+
+
+    def test_the_draft_refuses_to_build_before_the_images_are_approved(self) -> None:
+        """The gallery is the review surface; this is the gate it feeds."""
+        import argparse
+
+        pipeline.save_book(self.project, self._book())
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            pipeline.command_build(
+                argparse.Namespace(project=self.project, edition="draft")
+            )
+        self.assertIn("not been approved", str(caught.exception))
+
+    def test_approval_does_not_carry_over_to_different_art(self) -> None:
+        """Otherwise "approved" would mean "approved something, once"."""
+        import argparse
+        from PIL import Image
+
+        self._build()
+        changed = self.project / "output" / "images" / "composited" / "page-01.png"
+        Image.new("RGB", self.page_size, (10, 10, 10)).save(changed)
+        with self.assertRaises(pipeline.WorkflowError) as caught:
+            pipeline.command_build(
+                argparse.Namespace(project=self.project, edition="draft")
+            )
+        self.assertIn("changed after they were approved", str(caught.exception))
 
 
 if __name__ == "__main__":

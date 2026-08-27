@@ -1,8 +1,8 @@
 # Hekayati story language system
 
 This directory is the writing reference for age-fit Egyptian-Arabic story text.
-It applies to the exact Arabic caption stored in `story.json` and rendered later
-as a real, editable **PDF text layer**. Illustration images stay text-free. It
+It applies to the exact Arabic stored in `story.json` — the same string the image
+model then draws inside each page, on that page's **in-scene text surface**. It
 does not replace the story-template catalog, prompt compilation, or any
 reviewer.
 

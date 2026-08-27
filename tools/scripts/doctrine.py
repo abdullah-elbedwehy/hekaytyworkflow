@@ -111,6 +111,7 @@ def _validate_doctrine(payload: Mapping[str, Any]) -> None:
         "bookStructure",
         "imageTool",
         "printSafeColor",
+        "gamePages",
     )
     for key in required:
         if not isinstance(payload.get(key), dict):
@@ -152,6 +153,37 @@ def _validate_doctrine(payload: Mapping[str, Any]) -> None:
             raise DoctrineError(f"Unknown story type {type_id!r}; expected A, B or C")
         if entry.get("storyGoalMode") not in {"educational", "entertainment"}:
             raise DoctrineError(f"storyTypes.{type_id}.storyGoalMode must be educational|entertainment")
+
+    _validate_game_pages(payload)
+
+
+def _validate_game_pages(payload: Mapping[str, Any]) -> None:
+    """Every game kind must state what the author has to supply, and what to draw.
+
+    A game page whose rules are missing is worse than one with no rules at all:
+    the prompt still compiles, the image still renders, and nobody notices the
+    maze has three exits until the book is printed.
+    """
+    section = payload["gamePages"]
+    types = section.get("types")
+    if not isinstance(types, dict) or not types:
+        raise DoctrineError("gamePages.types must be a non-empty object")
+    for kind, entry in types.items():
+        if not isinstance(entry, dict):
+            raise DoctrineError(f"gamePages.types.{kind} must be an object")
+        for field in ("clauseEn", "shortClauseEn"):
+            if not str(entry.get(field) or "").strip():
+                raise DoctrineError(f"gamePages.types.{kind}.{field} is required")
+        fields = entry.get("requiredFields")
+        if not isinstance(fields, list) or not all(
+            isinstance(name, str) and name.strip() for name in fields
+        ):
+            raise DoctrineError(
+                f"gamePages.types.{kind}.requiredFields must list field names"
+            )
+    for field in ("sharedClauseEn", "sharedShortClauseEn"):
+        if not str(section.get(field) or "").strip():
+            raise DoctrineError(f"gamePages.{field} is required")
 
 
 def _validate_pattern_group(group: Any, label: str) -> None:
@@ -334,6 +366,50 @@ def print_safe_clause(language: str = "en") -> str:
     section = load_doctrine()["printSafeColor"]
     key = "promptClauseAr" if str(language).lower().startswith("ar") else "promptClauseEn"
     return str(section[key])
+
+
+def game_types() -> dict[str, Any]:
+    return load_doctrine()["gamePages"]["types"]
+
+
+def game_kinds() -> list[str]:
+    return sorted(game_types())
+
+
+def game_type(kind: Any) -> dict[str, Any]:
+    types = game_types()
+    key = str(kind or "").strip().casefold()
+    if key not in types:
+        raise DoctrineError(
+            f"Unknown game kind {kind!r}; expected one of {', '.join(sorted(types))}"
+        )
+    return types[key]
+
+
+def game_shared_clause() -> str:
+    return str(load_doctrine()["gamePages"]["sharedClauseEn"])
+
+
+def game_clause(kind: Any) -> str:
+    """The shared playability rule plus the one specific to this game kind."""
+    return f"{game_shared_clause()} {game_type(kind)['clauseEn']}"
+
+
+def game_short_clause(kind: Any) -> str:
+    """The same contract, compressed for a length-bounded image prompt.
+
+    The long form is the written rule; this is what actually reaches the model,
+    because a game page also has to carry a scene, identity locks and the exact
+    Arabic. What must never be dropped in the compression is the ban on drawing
+    the answer — a maze printed with its route traced is a wasted page.
+    """
+    section = load_doctrine()["gamePages"]
+    entry = game_type(kind)
+    return f"{section['sharedShortClauseEn']} {entry['shortClauseEn']}"
+
+
+def game_required_fields(kind: Any) -> list[str]:
+    return list(game_type(kind)["requiredFields"])
 
 
 def reference_sheet_clause() -> str:

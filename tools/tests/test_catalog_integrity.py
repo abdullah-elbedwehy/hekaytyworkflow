@@ -45,7 +45,7 @@ class ThemeCatalogTests(unittest.TestCase):
             "fingerprint",
             "visualStyle",
             "style",
-            "textSafeZoneHint",
+            "textCarrierHint",
             "compiledPromptStyleBlock",
         )
         for theme_id, theme in self.themes.items():

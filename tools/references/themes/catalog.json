@@ -20,7 +20,7 @@
       "compiledPromptStyleBlock": "premium whimsical children's storybook digital illustration, magical realism, soft painterly textures, cinematic multi-source lighting, rich saturated color, detailed joyful faces, warm-cool light mix, print-ready; NOT flat cartoon, NOT clipart, NOT washed gouache",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a soft painted wash — sky, mist, or open ground in the page palette — with no detail competing for attention."
+      "textCarrierHint": "Put the copy on a softly painted paper, board, or cloth surface in the page palette — clean edges, no printed pattern competing with the words, and the lettering painted in the same hand as the rest of the page."
     },
     "cartoony": {
       "themeId": "cartoony",
@@ -42,7 +42,7 @@
       "compiledPromptStyleBlock": "stylized 3D CGI children's animation, smooth clean surfaces, large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated color, soft cinematic sunlight, shallow depth of field, print-ready; match style reference images; NOT photoreal, NOT flat 2D clipart",
       "styleRefDir": "cartoony",
       "styleRefGlob": "ref-*.png",
-      "textSafeZoneHint": "Leave the lower band as a smooth out-of-focus 3D surface (floor, grass, water) lit by the same key light, free of props and characters."
+      "textCarrierHint": "Put the copy on a smooth 3D prop lit by the same key light — a sign, a board, a banner — its face flat and matte so the letters read, and the lettering following the prop's own perspective."
     },
     "fairytale-glow": {
       "themeId": "fairytale-glow",
@@ -64,7 +64,7 @@
       "compiledPromptStyleBlock": "classic hand-painted fairy-tale children's animation illustration, soft rounded character design, large sparkling expressive eyes, warm golden sunlight, lush saturated color, wholesome magical mood, print-ready; NOT photoreal, NOT flat clipart, NOT harsh neon; no studio brand names",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a gentle hand-painted glow — meadow, mist, or lamplight falloff — with no figures or fine brush detail."
+      "textCarrierHint": "Put the copy on a plain hand-painted surface catching the scene's warm glow — no engraved or gilded ornament around it, and the letters warm-toned rather than metallic."
     },
     "feature-cgi": {
       "themeId": "feature-cgi",
@@ -86,7 +86,7 @@
       "compiledPromptStyleBlock": "polished stylized 3D CGI children's feature animation, smooth clean surfaces, large expressive glassy eyes with catchlights, stylized hair clumps, vibrant saturated color, soft cinematic sunlight, shallow depth of field, print-ready; match style reference images; NOT photoreal, NOT flat 2D clipart; no studio brand names",
       "styleRefDir": "feature-cgi",
       "styleRefGlob": "ref-*.png",
-      "textSafeZoneHint": "Leave the lower band as a clean depth-of-field foreground plane in the scene's palette, uncluttered by geometry or characters."
+      "textCarrierHint": "Put the copy on a cleanly rendered surface with subtle material response, its face otherwise uncluttered, and let the lettering pick up the same soft shading as the prop it sits on."
     },
     "enchanted-glow": {
       "themeId": "enchanted-glow",
@@ -109,7 +109,7 @@
       "compiledPromptStyleBlock": "whimsical stylized 3D fairy-tale night illustration, soft rounded characters, large expressive eyes, deep midnight blues, glowing flora, golden sparkle dust, soft bloom, wonder-filled mood, print-ready; match style reference images; NOT photoreal, NOT flat clipart; no studio brand names",
       "styleRefDir": "enchanted-glow",
       "styleRefGlob": "ref-*.png",
-      "textSafeZoneHint": "Leave the lower band as calm night ground or deep-blue haze where the magical glow falls off, with no sparkles or figures."
+      "textCarrierHint": "Put the copy on a calm plain surface sitting in the magical light — no runes, sparkles, or glowing marks around the words, and the letters lit rather than luminous."
     },
     "wonder-trail": {
       "themeId": "wonder-trail",
@@ -131,7 +131,7 @@
       "compiledPromptStyleBlock": "vibrant painterly children's storybook adventure digital painting, soft brush texture, warm golden-hour light, large expressive eyes, saturated cheerful color, soft magical sparkles, adventure wonder mood, print-ready; match style reference images; NOT flat clipart, NOT photoreal; no studio brand names",
       "styleRefDir": "wonder-trail",
       "styleRefGlob": "ref-*.png",
-      "textSafeZoneHint": "Leave the lower band as broad painterly ground or sky wash, brushwork loose and quiet, no props or faces."
+      "textCarrierHint": "Put the copy on a broad painterly surface in the scene palette, brushwork quiet around the words, and the lettering brushed on rather than typeset."
     },
     "anime": {
       "themeId": "anime",
@@ -154,7 +154,7 @@
       "compiledPromptStyleBlock": "clean modern anime illustration, crisp cel shading, confident line art, large expressive eyes, bright gradient sky, vivid clean color, print-ready; NOT photoreal, NOT 3D; no studio brand names",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a flat cel-shaded ground or sky gradient with clean uninterrupted colour and no linework."
+      "textCarrierHint": "Put the copy on a clean cel-shaded plane with even colour and a crisp outline, and keep the lettering flat and evenly weighted, sitting on the plane's own angle."
     },
     "anime-film": {
       "themeId": "anime-film",
@@ -177,7 +177,7 @@
       "compiledPromptStyleBlock": "hand-painted cinematic anime film illustration, lush painted scenery, soft cel characters, warm nostalgic light, layered painted clouds, quiet wonder mood, print-ready; NOT photoreal, NOT flat vector; no studio or film names",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a soft hand-painted background plane — grass, water, or haze — with no characters or hard edges."
+      "textCarrierHint": "Put the copy on a soft hand-painted surface in the background palette, edges gentle, and let the lettering carry the same painted softness as the rest of the frame."
     },
     "watercolor": {
       "themeId": "watercolor",
@@ -199,7 +199,7 @@
       "compiledPromptStyleBlock": "traditional watercolour children's book illustration, soft bleeding washes, cold-press paper grain, luminous transparent layers, delicate ink accents, print-ready; NOT digital airbrush, NOT flat vector",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a pale watercolour wash on the paper grain, pigment thin and even, no drawn detail."
+      "textCarrierHint": "Put the copy on a pale wash over paper grain, thin and even, and let the letters sit as pigment on that paper — soft edges, no hard vector line."
     },
     "gouache-retro": {
       "themeId": "gouache-retro",
@@ -220,7 +220,7 @@
       "compiledPromptStyleBlock": "mid-century gouache picture-book illustration, flat matte shapes, limited retro palette of mustard teal brick and cream, textured paper ground, bold graphic composition, print-ready; NOT 3D, NOT photoreal",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a flat matte gouache colour block from the scene palette, free of pattern and figures."
+      "textCarrierHint": "Put the copy on a flat matte gouache colour block from the scene palette, free of pattern behind the words, and paint the letters in the same opaque flat hand."
     },
     "papercut": {
       "themeId": "papercut",
@@ -241,7 +241,7 @@
       "compiledPromptStyleBlock": "layered cut-paper collage illustration, stacked textured paper planes, soft drop shadows between layers, torn fibre edges, warm craft palette, tactile handmade feel, print-ready; NOT flat vector, NOT photoreal",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a single uncut sheet of coloured paper lying under the scene, its edge soft and shadowless."
+      "textCarrierHint": "Put the copy on a single uncut sheet of coloured paper with a soft edge, and let the letters read as cut or printed on that sheet, casting the same small shadow the other layers do."
     },
     "claymation": {
       "themeId": "claymation",
@@ -263,7 +263,7 @@
       "compiledPromptStyleBlock": "handmade clay stop-motion illustration, modelling-clay characters with fingerprints and tool marks, miniature built set, shallow macro depth of field, warm tabletop lighting, cosy handmade charm, print-ready; NOT CGI plastic, NOT 2D",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a smooth unsculpted clay or felt-backdrop floor lit by the same lamp, with no props resting on it."
+      "textCarrierHint": "Put the copy on a smooth clay or felt panel lit by the same lamp, and let the letters look pressed or painted into that surface rather than laid over it."
     },
     "felt-craft": {
       "themeId": "felt-craft",
@@ -284,7 +284,7 @@
       "compiledPromptStyleBlock": "handmade felt and fabric craft illustration, wool felt and cotton characters with visible stitching and button details, soft fibre texture, miniature textile set, warm cosy palette, print-ready; NOT CGI, NOT flat vector",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a plain stretch of felt or fabric backing, weave visible but even, with no stitching or appliqué."
+      "textCarrierHint": "Put the copy on a plain stretch of felt or fabric with an even weave, and let the letters read as stitched or appliquéd onto it, following the cloth's own drape."
     },
     "crayon-kid": {
       "themeId": "crayon-kid",
@@ -305,7 +305,7 @@
       "compiledPromptStyleBlock": "childlike crayon and coloured-pencil illustration, waxy strokes with paper tooth, wobbly confident outlines, joyful naive shapes, bright saturated colour, print-ready; NOT vector, NOT photoreal",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as lightly coloured paper with open white tooth showing, no scribble or drawn objects."
+      "textCarrierHint": "Put the copy on lightly coloured paper with the white tooth still showing, and let the letters be drawn in the same waxy direct hand as the rest of the page."
     },
     "comic-bold": {
       "themeId": "comic-bold",
@@ -327,7 +327,7 @@
       "compiledPromptStyleBlock": "bold comic-book children's illustration, heavy varied ink outlines, flat vivid colour, simple cel shadows, halftone dot texture, dynamic posing, print-ready; NOT photoreal, NOT painterly; no franchise emblems",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a flat inked colour field with no panel border, linework, or figures."
+      "textCarrierHint": "Put the copy on a flat inked colour field with a clean edge — a sign or banner in the scene, never a comic panel or speech balloon — and letter it in the same confident ink."
     },
     "retro-cartoon": {
       "themeId": "retro-cartoon",
@@ -349,7 +349,7 @@
       "compiledPromptStyleBlock": "1990s hand-drawn television cartoon illustration, ink-and-paint cels with two-tone shading, softly painted backgrounds, rounded friendly design, warm saturated colour, slight grain, print-ready; NOT 3D, NOT photoreal",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as a plain painted background wash in the cartoon's flat palette, no outlines or characters."
+      "textCarrierHint": "Put the copy on a plain background wash in the cartoon's flat palette, and let the letters be painted flat with the same clean ink outline as the props."
     },
     "pixel-art": {
       "themeId": "pixel-art",
@@ -371,7 +371,7 @@
       "compiledPromptStyleBlock": "detailed pixel-art scene illustration, chunky pixels on a consistent grid, limited bright indexed palette, clear silhouettes, simple dithering, crisp edges, print-ready; NOT vector, NOT photoreal, NOT blurry",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as an even dithered ground or sky tile with no sprites, objects, or UI elements."
+      "textCarrierHint": "Put the copy on a solid unbroken field of clean even pixel blocks in the scene palette, and build the letters from the same pixel grid at a size that stays legible."
     },
     "chalk-pastel": {
       "themeId": "chalk-pastel",
@@ -392,7 +392,7 @@
       "compiledPromptStyleBlock": "soft chalk pastel illustration, powdery blended strokes with visible grain, warm mid-toned paper ground, bright pulled highlights, velvety transitions, cosy dusk palette, print-ready; NOT airbrush, NOT photoreal",
       "styleRefDir": null,
       "styleRefGlob": null,
-      "textSafeZoneHint": "Leave the lower band as softly blended chalk on the toned paper ground, powdery and even, with no drawn shapes."
+      "textCarrierHint": "Put the copy on a soft chalk-dusted board or paper face with even tone, and let the letters be drawn in the same powdery chalk, slightly blended at the edges."
     }
   }
 }

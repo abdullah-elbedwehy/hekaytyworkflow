@@ -359,7 +359,7 @@
       },
       {
         "id": "I2",
-        "ruleAr": "النص العربي جوه الصورة غير موثوق — الفن يطلع خالي من أي كتابة، والنص يتحط كطبقة نص حقيقية في الـPDF."
+        "ruleAr": "مولّد الصور هو اللي بيكتب العربي جوه الرسمة، على السطح المحدد في `textSurface`. العربي من المولّد بيتكسر بطرق معروفة — معكوس، حروف مفكوكة، كلام مخترع، نص خارج حدود السطح — فتوقع إعادة محاولات، وارفض أي صفحة نصها مش مطابق حرف بحرف للنص المعتمد. ممنوع شريط سفلي أو scrim أو طبقة نص فوق الرسمة كـfallback. الـPDF بيحتفظ بنفس النص غير مرئي عشان النسخ والبحث."
       },
       {
         "id": "I3",
@@ -404,6 +404,45 @@
       "placementAr": "مكان صفحة اللعبة لازم يتماشى مع منطق حركة الأحداث الفعلي.",
       "companionAr": "لو فيه رفيق/صاحب في صفحة اللعبة، لازم يشارك فعليًا في اللعب مع البطل."
     }
+  },
+  "gamePages": {
+    "sourceSection": "handoff §8 — صفحات الألعاب",
+    "placementRuleAr": "مكان صفحة اللعبة يتماشى مع منطق حركة الأحداث الفعلي — متاهة «اوصل للفصل» أثناء المشي، مش بعد الوصول.",
+    "companionRuleAr": "لو فيه رفيق/صاحب في صفحة اللعبة، لازم يشارك فعليًا في اللعب مع البطل.",
+    "authoringRuleAr": "الـAgent لازم يكتب كل عنصر ومكانه بالتفصيل بنفسه — ممنوع تسيب الأداة تخترع عناصر اللعبة.",
+    "sharedClauseEn": "This is a playable activity page, not a picture of one. The puzzle must be solvable exactly as drawn, every element listed below must appear exactly as described, and the solution is never marked, highlighted, traced, or circled anywhere in the frame.",
+    "types": {
+      "maze": {
+        "labelAr": "متاهة",
+        "requiredFields": [
+          "startDescription",
+          "goalDescription",
+          "elements"
+        ],
+        "clauseEn": "Draw a maze with exactly one continuous open route from the marked start to the marked goal. Every other corridor dead-ends. Walls are unbroken and never cross the solution route. Corridors stay wide enough for a child's finger or crayon. Mark the start and the goal only — never the winning path.",
+        "shortClauseEn": "Exactly one open route from start to goal; every other corridor dead-ends. Mark both ends, never the path."
+      },
+      "spot-the-difference": {
+        "labelAr": "اختلافات",
+        "requiredFields": [
+          "differenceCount",
+          "differences",
+          "elements"
+        ],
+        "clauseEn": "Draw two panels of the same scene, side by side and identical in framing, lighting, palette and every object, except for exactly the listed differences. Each difference is a whole-object change a child can name out loud — never a shading, perspective or compression artefact. Do not mark, circle or number them.",
+        "shortClauseEn": "Two panels identical in framing, light and every object except the listed differences."
+      },
+      "search-and-find": {
+        "labelAr": "دوّر على حاجات",
+        "requiredFields": [
+          "targetItems",
+          "elements"
+        ],
+        "clauseEn": "Every listed target item appears in the scene, fully visible, unobstructed and countable at the stated quantity. Nothing that resembles a target item appears at any other count. Do not mark, circle or highlight the targets.",
+        "shortClauseEn": "Every target appears fully visible and countable at its stated number."
+      }
+    },
+    "sharedShortClauseEn": "must be solvable exactly as drawn: draw every declared element, invent nothing, and never mark, trace, circle or number the answer."
   },
   "printSafeColor": {
     "printer": "RST Prints",
@@ -538,5 +577,20 @@
       "active": true,
       "noteAr": "تم الاتفاق على قواعد الألوان الآمنة بسبب تصنيف Rich Coverage"
     }
+  },
+  "textInImage": {
+    "sourceSection": "handoff §7 — النص داخل الرسم، و§8 I2",
+    "author": "image-model",
+    "ruleAr": "مولّد الصور بيكتب نص الصفحة المعتمد جوه الرسمة نفسها على سطح موجود في المشهد. ممنوع شريط سفلي، scrim، أو طبقة نص فوق الصورة.",
+    "promptFields": {
+      "text": "inImageText",
+      "surface": "textSurface"
+    },
+    "referenceSheetsAreWordless": true,
+    "pdfKeepsInvisibleCopy": true,
+    "retiredModes": [
+      "pdf-caption-overlay",
+      "blank-carrier-composite"
+    ]
   }
 }

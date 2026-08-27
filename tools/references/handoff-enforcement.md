@@ -2,8 +2,8 @@
 
 Every rule in [`handoff.md`](handoff.md) and where it is actually enforced.
 A rule with **no machine gate** is a human-judgement rule — it lives in the
-review rubrics and the vault checklists, and the reviewers are expected to catch
-it. Do not pretend it is automated.
+review rubrics, and the reviewers are expected to catch it. Do not pretend it is
+automated.
 
 Machine-readable rulebook: [`handoff/doctrine.json`](handoff/doctrine.json).
 Loader and checks: `tools/scripts/doctrine.py`.
@@ -25,6 +25,24 @@ way to reach images with a doctrine error open.
 | مفيش برومبت قبل الموافقة الصريحة | the permanent Markdown review gate: `prepare-story-review` → `approve-story-review` → `lock-story` |
 | مفيش أكتر من صفحة في رسالة توليد | `manual-dispatch` — one instruction per message, `maxPagesPerFile = 2` |
 | مفيش تقسيم لقطات من غير اتفاق | `manual-dispatch` prints «مشهد واحد = صورة واحدة» in every block |
+
+## Human gates (the ladder `context` walks)
+
+None of these can be satisfied by agent judgement; each records a statement from
+a person, and the pipeline refuses to move past it.
+
+| Gate | Enforced by |
+|---|---|
+| موافقة استخدام الصور | `confirm-consent`; every generating command calls `ensure_consent` |
+| مراجعة الأهل للقصة | `prepare-story-review` → `approve-story-review`; `lock-story` and `preflight` call `require_story_review_approved` |
+| موافقة حزمة البرومبتات | `approve-prompts`; `manual-dispatch` and the image lane call `require_prompt_approved` |
+| اختيار مسار الصور | `set-image-lane` — no default; `require_lane` refuses a mismatched dispatch |
+| قبول شيت الشخصية | `character-review --accept`; pages cannot generate before it |
+| **موافقة على الصور** | `approve-images`; `build` calls `require_images_approved`, which also rebinds to the image bytes, so regenerating one page after approval invalidates it |
+| الموافقة النهائية | `approve-final`; the `final` edition cannot build before it |
+
+`context --until <gate>` returns the stretch that runs unattended and the first
+of these that still needs a person.
 
 ## §2 Literal language (highest priority)
 
@@ -104,22 +122,22 @@ no story beat.
 | ID | Enforced by |
 |---|---|
 | I1 self-contained | `manual-dispatch` renders one complete message per page |
-| I2 نص عربي غير موثوق | art is text-free; `validate-prompts` rejects a prompt missing the clause or leaking the story text |
-| I3 Reference Sheet في كل رسالة | `manual-dispatch` always prints the clause and an attachment row (⚠️ if the sheet path is unknown) |
+| I2 نص عربي غير موثوق | every compiled render carries the exact `inImageText` on its named `textSurface` with the overlay ban; `validate-prompts` and `begin-asset` reject a prompt with no copy or whose copy drifted from the approved story text; the arabic rubric reads the drawn letterforms on the finished page |
+| I3 Reference Sheet في كل رسالة | `manual-dispatch` always prints the clause and an attachment row (⚠️ if the sheet path is unknown); `build_compiled_prompt` puts the same rule in every compiled render and `validate-prompts` rejects one that lost it |
 | I4 مفيش multi-shot | printed in every block |
-| I5 Landscape 16:9 | `settings.orientation` + `validate-prompts` + `verify` reject off-ratio |
-| I6 مطابقة الشيت تكسب | printed verbatim in every block |
+| I5 Landscape 16:9 | `settings.orientation` + `validate-prompts` + `verify` reject off-ratio; the Nano Banana render also states `landscape 16:9 aspect ratio` in words, because that lane has no ratio switch |
+| I6 مطابقة الشيت تكسب | printed verbatim in every block, and every compiled render ends the reference clause with `the reference sheet wins` |
 | I7 صفحة واحدة لكل رد | `manual-dispatch` refuses a file with more than two pages |
 | I8 شيتات الشخصيات | `render_character_sheet_instruction` lists the four angles |
-| ألعاب: متاهة / دور على حاجات | **human** — the agent writes every element; no generator yet |
+| ألعاب: متاهة / دور على حاجات | `validate-prompts` → `game_page_failures`: a page whose `beat`, `setting`, or visible `text` reads as an instruction must declare a `gameSpec` with every field its `kind` requires, and a `differenceCount` matching the differences listed. Whether the puzzle is actually *solvable as drawn* is still **human** — the agent writes every element; there is no generator |
 
 ## §9 Print-safe colour
 
 | Rule | Enforced by |
 |---|---|
-| كل برومبت فيه جملة الألوان | `build_compiled_prompt` adds it at a priority the length-shedding pass never drops; `validate-prompts` rejects a prompt without it |
-| Ink limit / GCR / TAC | **human** — pre-print checklist in the vault |
-| K-only text | the PDF text layer is drawn K-only by the builder; verify in Acrobat |
+| كل برومبت فيه جملة الألوان | `build_compiled_prompt` adds it at a priority the length-shedding pass never drops, on **every** target render; `validate-prompts` rejects any render without it |
+| Ink limit / GCR / TAC | **human** — explicit pre-print operator check |
+| K-only text (P8) | **not achievable, by design** — the model draws the Arabic, so the visible text is pixels and no threshold separates it from dark art (`cmyk_export.py` measures why, and `export-cmyk` warns on every run). The working lever is a heavy-GCR profile passed to `export-cmyk --icc`; verify TAC in Acrobat before printing |
 
 ## What is deliberately not automated
 
@@ -130,6 +148,5 @@ no story beat.
 - Whether a game page sits where the action actually is (N7)
 - Ink limit, GCR, and TAC verification in Acrobat
 
-These belong to the reviewers and to
-`vault/01-Checklists/`. Adding a weak regex for them would be worse than
-admitting they are human calls.
+These belong to the reviewers and the explicit pre-print operator check.
+Adding a weak regex for them would be worse than admitting they are human calls.

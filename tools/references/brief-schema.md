@@ -5,7 +5,7 @@ For newly generated files, `language` is always the canonical label
 
 ```json
 {
-  "project": "/Users/abdullah/Desktop/project1",
+  "project": "<ABS>/Rawy/Clients/<slug>",
   "language": "natural Egyptian Arabic",
   "targetAge": 5,
   "languageProfileId": "age-3-5",
