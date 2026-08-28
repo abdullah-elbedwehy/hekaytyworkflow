@@ -51,8 +51,15 @@ PY
 }
 
 pick_python() {
+  # Plain `python3` first: on a machine that already has one working
+  # interpreter on PATH, that is the one every other tool (Codex, cron, the
+  # user's shell) resolves to, and it is the one `story_pipeline.py` itself
+  # runs under. Falling through to a versioned python3.1x here has, in
+  # practice, landed on a uv-managed shim whose environment is
+  # externally-managed and refuses `pip install` outright — a real interpreter
+  # gets skipped in favour of one that cannot be set up.
   local cand
-  for cand in python3.12 python3.11 python3.10 python3; do
+  for cand in python3 python3.12 python3.11 python3.10; do
     if have "$cand" && python_ok "$cand"; then
       echo "$cand"
       return 0
@@ -163,20 +170,38 @@ install_obsidian() {
   ok "Obsidian installed"
 }
 
-install_python_deps() {
+deps_importable() {
   local py="$1"
-  step "Python packages (images, PDF, Arabic shaping)"
-  [[ -f "$REQS" ]] || fail "Missing $REQS"
-  "$py" -m pip install --upgrade pip >/dev/null
-  "$py" -m pip install -r "$REQS"
-  "$py" - <<'PY'
+  "$py" - <<'PY' >/dev/null 2>&1
 from PIL import Image  # noqa: F401
 import arabic_reshaper  # noqa: F401
 from bidi.algorithm import get_display  # noqa: F401
 import reportlab  # noqa: F401
 import pypdf  # noqa: F401
-print("imports ok")
 PY
+}
+
+install_python_deps() {
+  local py="$1"
+  step "Python packages (images, PDF, Arabic shaping)"
+  [[ -f "$REQS" ]] || fail "Missing $REQS"
+  if deps_importable "$py"; then
+    ok "Already importable under $py — nothing to install"
+    return
+  fi
+  "$py" -m pip install --upgrade pip >/dev/null 2>&1 || true
+  if ! "$py" -m pip install -r "$REQS" 2>/tmp/hekayati-pip-err.$$; then
+    if grep -qi 'externally-managed-environment' /tmp/hekayati-pip-err.$$; then
+      warn "$py is externally managed (PEP 668) — retrying with --break-system-packages"
+      "$py" -m pip install --break-system-packages -r "$REQS"
+    else
+      cat /tmp/hekayati-pip-err.$$ >&2
+      rm -f /tmp/hekayati-pip-err.$$
+      fail "pip install failed under $py"
+    fi
+  fi
+  rm -f /tmp/hekayati-pip-err.$$
+  deps_importable "$py" || fail "Packages installed but still not importable under $py"
   ok "Python deps installed"
 }
 
@@ -241,7 +266,10 @@ main() {
   install_codex
   install_obsidian
   install_python_deps "$py"
-  python3 "$ROOT/tools/scripts/install_rawy_plugins.py" || warn "Rawy plugin download failed; enable them from Obsidian if needed"
+  # No community-plugin installer here on purpose: obsidian_vault.py configures
+  # only Obsidian's built-in core plugins (see its module docstring), so there
+  # is nothing to download. A script by this name never shipped; this call used
+  # to fail on every run and get silently swallowed by the warn fallback.
   check_dispatch
 
   local logged_in=0
